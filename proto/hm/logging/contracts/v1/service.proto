@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package hm.logging.contracts.v1;
+
+import "hm/logging/contracts/v1/flow.proto";
+
+option csharp_namespace = "Hm.Logging.Contracts";
+
+// Provides the language-neutral distributed Logging Flow operations. gRPC
+// status communicates whether an operation could execute validly; response
+// result enums communicate valid semantic outcomes. This contract does not
+// implement Flow state, lifecycle storage, or provider behavior.
+service LoggingService {
+  // Creates a new empty Flow and returns its opaque identifier.
+  rpc CreateFlow(CreateFlowRequest) returns (CreateFlowResponse);
+
+  // Explicitly closes a Flow. Closing an inactive Flow is a valid idempotent
+  // outcome represented by CloseFlowResult.
+  rpc CloseFlow(CloseFlowRequest) returns (CloseFlowResponse);
+
+  // Adds a context layer to an existing Flow. Repeating the current top
+  // context is a valid no-op that preserves PushScope retry safety.
+  rpc PushScope(PushScopeRequest) returns (PushScopeResponse);
+
+  // Removes the top Flow context. A guarded request with expected_context is
+  // the retry-safe form; an unconditional request is not retry-safe.
+  rpc PopScope(PopScopeRequest) returns (PopScopeResponse);
+
+  // Submits a structured entry independently or with an optional Flow.
+  rpc Log(LogRequest) returns (LogResponse);
+}

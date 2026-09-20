@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package hm.logging.contracts.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "google/type/decimal.proto";
+
+option csharp_namespace = "Hm.Logging.Contracts";
+
+// Defines the severity of a log entry. Trace is an explicit domain value, not
+// an unspecified sentinel.
+enum LogLevel {
+  LOG_LEVEL_TRACE = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFORMATION = 2;
+  LOG_LEVEL_WARNING = 3;
+  LOG_LEVEL_ERROR = 4;
+  LOG_LEVEL_CRITICAL = 5;
+}
+
+// Represents an absolute metadata date/time and, when supplied by the
+// producer, the UTC offset of its original representation. The offset does
+// not change the absolute instant and is not a time-zone identifier.
+message DateTimeValue {
+  google.protobuf.Timestamp timestamp = 1;
+  google.protobuf.Duration utc_offset = 2;
+}
+
+// Represents one scalar metadata value. An unset oneof represents no retained
+// metadata value. Producers use string_value for textual identifiers such as
+// characters, UUIDs, and enum representations when no dedicated category is
+// required by this protocol.
+message MetadataValue {
+  oneof value {
+    string string_value = 1;
+    bool boolean_value = 2;
+    int64 signed_integer_value = 3;
+    uint64 unsigned_integer_value = 4;
+    float float_value = 5;
+    double double_value = 6;
+    google.type.Decimal decimal_value = 7;
+    DateTimeValue date_time_value = 8;
+    google.protobuf.Duration duration_value = 9;
+  }
+}
+
+// Provides contextual defaults applied to log entries. A LogEntry's explicit
+// contextual property or metadata value takes precedence over this context.
+// Flow identity and event-specific properties are intentionally not context
+// fields.
+message LogContext {
+  optional string source = 1;
+  optional string trace_id = 2;
+  optional string correlation_id = 3;
+  map<string, MetadataValue> metadata = 4;
+}
+
+// Represents a structured logging event. The level and scalar optional fields
+// preserve wire presence. An omitted timestamp is preserved as omitted; this
+// protocol does not generate event timestamps or trace identifiers.
+message LogEntry {
+  string message = 1;
+  optional LogLevel level = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  optional string source = 4;
+  optional string trace_id = 5;
+  optional string correlation_id = 6;
+  optional string exception = 7;
+  map<string, MetadataValue> metadata = 8;
+}

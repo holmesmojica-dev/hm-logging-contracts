@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package hm.logging.contracts.v1;
+
+import "hm/logging/contracts/v1/logging.proto";
+
+option csharp_namespace = "Hm.Logging.Contracts";
+
+// Requests creation of one new, empty Logging Flow. CreateFlow is not
+// idempotent: a retry after a lost response can create another Flow.
+message CreateFlowRequest {}
+
+// Returns the opaque identifier of the newly created Flow.
+message CreateFlowResponse {
+  string flow_id = 1;
+  string message = 2;
+}
+
+// Requests explicit closure of a Flow. The flow_id is semantically required.
+message CloseFlowRequest {
+  string flow_id = 1;
+}
+
+// Describes a valid CloseFlow outcome. UNSPECIFIED is defensive and is not a
+// functional result.
+enum CloseFlowResult {
+  CLOSE_FLOW_RESULT_UNSPECIFIED = 0;
+  CLOSE_FLOW_RESULT_CLOSED = 1;
+  CLOSE_FLOW_RESULT_ALREADY_CLOSED = 2;
+}
+
+// Reports the semantic outcome of closing a Flow. Valid no-op outcomes use
+// gRPC OK and this result rather than an embedded transport status code.
+message CloseFlowResponse {
+  CloseFlowResult result = 1;
+  string message = 2;
+}
+
+// Adds context to an existing Flow. Both fields are semantically required.
+// PushScope never creates a missing Flow.
+message PushScopeRequest {
+  string flow_id = 1;
+  LogContext context = 2;
+}
+
+// Describes a valid PushScope outcome. UNSPECIFIED is defensive and is not a
+// functional result.
+enum PushScopeResult {
+  PUSH_SCOPE_RESULT_UNSPECIFIED = 0;
+  PUSH_SCOPE_RESULT_ADDED = 1;
+  PUSH_SCOPE_RESULT_ALREADY_EXISTS = 2;
+}
+
+// Reports whether a context was added or was already the Flow's top context.
+message PushScopeResponse {
+  PushScopeResult result = 1;
+  string message = 2;
+}
+
+// Removes the top context from a Flow. If expected_context is omitted, the
+// operation is unconditional and is not retry-safe. When supplied, it guards
+// the operation and supports retry-safe PopScope semantics.
+message PopScopeRequest {
+  string flow_id = 1;
+  optional LogContext expected_context = 2;
+}
+
+// Describes a valid PopScope outcome. UNSPECIFIED is defensive and is not a
+// functional result.
+enum PopScopeResult {
+  POP_SCOPE_RESULT_UNSPECIFIED = 0;
+  POP_SCOPE_RESULT_REMOVED = 1;
+  POP_SCOPE_RESULT_NO_SCOPES = 2;
+  POP_SCOPE_RESULT_CONTEXT_MISMATCH = 3;
+}
+
+// Reports the semantic outcome of removing a Flow scope.
+message PopScopeResponse {
+  PopScopeResult result = 1;
+  string message = 2;
+}
+
+// Submits one log entry. flow_id is optional: omission requests independent
+// logging without Flow context. A supplied inactive Flow does not discard the
+// entry; it produces ACCEPTED_WITHOUT_FLOW.
+message LogRequest {
+  optional string flow_id = 1;
+  LogEntry entry = 2;
+}
+
+// Describes a valid Log outcome. UNSPECIFIED is defensive and is not a
+// functional result.
+enum LogResult {
+  LOG_RESULT_UNSPECIFIED = 0;
+  LOG_RESULT_ACCEPTED = 1;
+  LOG_RESULT_ACCEPTED_WITHOUT_FLOW = 2;
+}
+
+// Reports whether the entry was accepted with or without Flow context. Log is
+// not idempotent: a retry after a lost response can create a duplicate entry.
+message LogResponse {
+  LogResult result = 1;
+  string message = 2;
+}

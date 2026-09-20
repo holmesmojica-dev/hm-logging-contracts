@@ -1,0 +1,20 @@
+version: v2
+
+modules:
+  - path: proto
+
+deps:
+  - buf.build/googleapis/googleapis
+
+lint:
+  use:
+    - STANDARD
+  # LogLevel is a domain value enum whose valid zero is Trace. The Contracts
+  # architecture explicitly prohibits adding an UNSPECIFIED sentinel.
+  ignore_only:
+    ENUM_ZERO_VALUE_SUFFIX:
+      - proto/hm/logging/contracts/v1/logging.proto
+
+breaking:
+  use:
+    - FILE

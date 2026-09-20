@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Hm.Logging.Contracts/Hm.Logging.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Hm.Logging.Contracts.Tests/Hm.Logging.Contracts.Tests.csproj" />
+  </Folder>
+</Solution>
