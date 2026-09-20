@@ -1,0 +1,3 @@
+# Keep text files in the index and working tree in LF form on every platform.
+# This policy takes precedence over a developer's core.autocrlf setting.
+* text=auto eol=lf

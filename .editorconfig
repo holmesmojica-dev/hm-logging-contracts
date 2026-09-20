@@ -1,10 +1,12 @@
 root = true
 
+[*]
+end_of_line = lf
+insert_final_newline = true
+
 [*.cs]
 indent_style = space
 indent_size = 4
-end_of_line = crlf
-insert_final_newline = true
 
 dotnet_sort_system_directives_first = true
 csharp_style_namespace_declarations = file_scoped:warning
