@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>HDev.Hm.Logging.Contracts</PackageId>
+    <Authors>Holmes Mojica</Authors>
+    <Company>Holmes Mojica Dev</Company>
+    <Description>Language-neutral Protocol Buffers and gRPC contracts for the HM Logging ecosystem.</Description>
+    <PackageTags>logging;grpc;protobuf;contracts;observability</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IncludeGoogleApiCommonProtos>true</IncludeGoogleApiCommonProtos>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Api.CommonProtos" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Core.Api" />
+    <PackageReference Include="Grpc.Tools">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="..\..\proto\hm\logging\contracts\v1\logging.proto"
+              ProtoRoot="..\..\proto" />
+    <Protobuf Include="..\..\proto\hm\logging\contracts\v1\flow.proto"
+              ProtoRoot="..\..\proto" />
+    <Protobuf Include="..\..\proto\hm\logging\contracts\v1\service.proto"
+              ProtoRoot="..\..\proto"
+              GrpcServices="Both" />
+
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+    <None Include="..\..\proto\**\*.proto" Pack="true" PackagePath="proto" />
+  </ItemGroup>
+</Project>
