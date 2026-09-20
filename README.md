@@ -16,3 +16,15 @@ behavior.
 HM-owned schemas are under `proto/hm/logging/contracts/v1/`. Buf configuration
 and the dependency lock file govern protobuf formatting, linting, building,
 and future compatibility validation.
+
+## Validation
+
+Enable the repository-managed pre-commit hook after cloning:
+
+```powershell
+pwsh -File scripts/install-hooks.ps1
+```
+
+The hook runs formatting verification, a Release build and test run, and Buf
+format, lint, and build checks. Pull requests targeting `main` run the same
+validations in GitHub Actions; CI is the authoritative validation gate.
