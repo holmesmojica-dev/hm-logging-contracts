@@ -9,7 +9,7 @@ function Test-HmCanonicalNonNegativeInteger {
     return $Value -eq '0' -or $Value -match '^[1-9][0-9]*$'
 }
 
-function Resolve-HmReleaseTag {
+function Get-HmReleaseVersionFromTag {
     param(
         [Parameter(Mandatory)]
         [string]$Tag
@@ -28,15 +28,39 @@ function Resolve-HmReleaseTag {
         throw "Release tag '$Tag' must not contain SemVer build metadata."
     }
 
+    return $releaseVersion
+}
+
+function Split-HmReleaseVersion {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ReleaseVersion
+    )
+
     $prereleaseSeparator = $releaseVersion.IndexOf('-', [System.StringComparison]::Ordinal)
     if ($prereleaseSeparator -lt 0) {
-        $coreVersion = $releaseVersion
-        $prerelease = $null
+        return [pscustomobject]@{
+            CoreVersion = $releaseVersion
+            HasPrerelease = $false
+            Prerelease = $null
+        }
     }
-    else {
-        $coreVersion = $releaseVersion.Substring(0, $prereleaseSeparator)
-        $prerelease = $releaseVersion.Substring($prereleaseSeparator + 1)
+
+    return [pscustomobject]@{
+        CoreVersion = $releaseVersion.Substring(0, $prereleaseSeparator)
+        HasPrerelease = $true
+        Prerelease = $releaseVersion.Substring($prereleaseSeparator + 1)
     }
+}
+
+function Assert-HmCanonicalCoreVersion {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Tag,
+
+        [Parameter(Mandatory)]
+        [string]$CoreVersion
+    )
 
     $coreIdentifiers = $coreVersion.Split('.')
     if ($coreIdentifiers.Count -ne 3) {
@@ -48,22 +72,49 @@ function Resolve-HmReleaseTag {
             throw "Release tag '$Tag' must contain a canonical major.minor.patch version."
         }
     }
+}
 
-    if ($null -ne $prerelease) {
-        if ([string]::IsNullOrEmpty($prerelease)) {
-            throw "Release tag '$Tag' has an empty prerelease identifier."
+function Assert-HmPrereleaseIdentifiers {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Tag,
+
+        [Parameter()]
+        [bool]$HasPrerelease,
+
+        [Parameter()]
+        [string]$Prerelease
+    )
+
+    if (-not $HasPrerelease) {
+        return
+    }
+
+    if ([string]::IsNullOrEmpty($prerelease)) {
+        throw "Release tag '$Tag' has an empty prerelease identifier."
+    }
+
+    foreach ($identifier in $prerelease.Split('.')) {
+        if ([string]::IsNullOrEmpty($identifier) -or $identifier -notmatch '^[0-9A-Za-z-]+$') {
+            throw "Release tag '$Tag' has an invalid prerelease identifier."
         }
 
-        foreach ($identifier in $prerelease.Split('.')) {
-            if ([string]::IsNullOrEmpty($identifier) -or $identifier -notmatch '^[0-9A-Za-z-]+$') {
-                throw "Release tag '$Tag' has an invalid prerelease identifier."
-            }
-
-            if ($identifier -match '^[0-9]+$' -and -not (Test-HmCanonicalNonNegativeInteger $identifier)) {
-                throw "Release tag '$Tag' has a prerelease numeric identifier with a leading zero."
-            }
+        if ($identifier -match '^[0-9]+$' -and -not (Test-HmCanonicalNonNegativeInteger $identifier)) {
+            throw "Release tag '$Tag' has a prerelease numeric identifier with a leading zero."
         }
     }
+}
+
+function Resolve-HmReleaseTag {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Tag
+    )
+
+    $releaseVersion = Get-HmReleaseVersionFromTag -Tag $Tag
+    $components = Split-HmReleaseVersion -ReleaseVersion $releaseVersion
+    Assert-HmCanonicalCoreVersion -Tag $Tag -CoreVersion $components.CoreVersion
+    Assert-HmPrereleaseIdentifiers -Tag $Tag -HasPrerelease $components.HasPrerelease -Prerelease $components.Prerelease
 
     return [pscustomobject]@{
         Tag = $Tag
