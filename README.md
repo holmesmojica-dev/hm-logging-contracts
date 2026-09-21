@@ -28,3 +28,14 @@ pwsh -File scripts/install-hooks.ps1
 The hook runs formatting verification, a Release build and test run, and Buf
 format, lint, and build checks. Pull requests targeting `main` run the same
 validations in GitHub Actions; CI is the authoritative validation gate.
+
+Authoritative CI also runs a NuGet dependency vulnerability audit, generates
+Sonar-supported .NET coverage XML for handwritten code, performs SonarQube Cloud analysis,
+and blocks integration when the Sonar Quality Gate fails. Pull requests also
+run GitHub Dependency Review, blocking newly introduced moderate, high, or
+critical vulnerabilities. Sonar and Dependency Review are CI-only; they are
+not part of the local pre-commit hook.
+
+A release is eligible only when the authoritative Sonar Quality Gate has
+successfully verified the exact release commit. Future publication automation
+will enforce that rule.
