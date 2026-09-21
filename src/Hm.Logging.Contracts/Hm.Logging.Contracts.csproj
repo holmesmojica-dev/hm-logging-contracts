@@ -25,7 +25,6 @@
     <Version>$(ReleaseVersion)</Version>
     <PackageVersion>$(ReleaseVersion)</PackageVersion>
     <FileVersion>$([System.Text.RegularExpressions.Regex]::Match('$(ReleaseVersion)', '^\d+\.\d+\.\d+').Value).0</FileVersion>
-    <InformationalVersion>$(ReleaseVersion)</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -61,7 +60,6 @@
   <Target Name="ValidateReleaseVersion" BeforeTargets="GenerateNuspec">
     <Error Condition="'$(ReleaseVersion)' == ''"
            Text="ReleaseVersion must be supplied from the release SemVer identity when creating a package." />
-    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(ReleaseVersion)', '^\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'))"
-           Text="ReleaseVersion must be a SemVer identity." />
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildThisFileDirectory)..\..\scripts\Assert-ReleaseVersion.ps1&quot; -ReleaseVersion &quot;$(ReleaseVersion)&quot;" />
   </Target>
 </Project>

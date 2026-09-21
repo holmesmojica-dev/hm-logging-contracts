@@ -57,6 +57,7 @@ try {
     Invoke-ValidationCommand -Command dotnet -Arguments @('format', 'Hm.Logging.Contracts.slnx', '--no-restore', '--verify-no-changes')
     Invoke-ValidationCommand -Command dotnet -Arguments @('build', 'Hm.Logging.Contracts.slnx', '--configuration', 'Release', '--no-restore')
     Invoke-ValidationCommand -Command dotnet -Arguments @('test', 'Hm.Logging.Contracts.slnx', '--configuration', 'Release', '--no-build', '--no-restore')
+    Invoke-ValidationCommand -Command pwsh -Arguments @('-NoProfile', '-File', 'tests/ReleaseVersioning.Tests.ps1')
     Invoke-ValidationCommand -Command buf -Arguments @('format', 'proto', '--exit-code') -SuppressOutput
     Invoke-ValidationCommand -Command buf -Arguments @('lint')
     Invoke-ValidationCommand -Command buf -Arguments @('build')
