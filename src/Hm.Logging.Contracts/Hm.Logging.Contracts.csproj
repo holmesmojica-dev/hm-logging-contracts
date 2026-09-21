@@ -4,12 +4,28 @@
     <Authors>Holmes Mojica</Authors>
     <Company>Holmes Mojica Dev</Company>
     <Description>Language-neutral Protocol Buffers and gRPC contracts for the HM Logging ecosystem.</Description>
-    <PackageTags>logging;grpc;protobuf;contracts;observability</PackageTags>
+    <PackageTags>logging;grpc;protobuf;contracts;distributed-logging;observability</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <RepositoryUrl>https://github.com/holmesmojica-dev/hm-logging-contracts</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/holmesmojica-dev/hm-logging-contracts</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <DebugType>portable</DebugType>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <IncludeGoogleApiCommonProtos>true</IncludeGoogleApiCommonProtos>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(ReleaseVersion)' != ''">
+    <Version>$(ReleaseVersion)</Version>
+    <PackageVersion>$(ReleaseVersion)</PackageVersion>
+    <FileVersion>$([System.Text.RegularExpressions.Regex]::Match('$(ReleaseVersion)', '^\d+\.\d+\.\d+').Value).0</FileVersion>
+    <InformationalVersion>$(ReleaseVersion)</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +35,9 @@
     <PackageReference Include="Grpc.Tools">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.SourceLink.GitHub">
+      <PrivateAssets>all</PrivateAssets>
     </PackageReference>
   </ItemGroup>
 
@@ -33,6 +52,16 @@
 
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
-    <None Include="..\..\proto\**\*.proto" Pack="true" PackagePath="proto" />
+    <None Include="..\..\icon.png" Pack="true" PackagePath="\" />
+    <None Include="..\..\proto\hm\logging\contracts\v1\**\*.proto"
+          Pack="true"
+          PackagePath="content/protos/hm/logging/contracts/v1/%(RecursiveDir)" />
   </ItemGroup>
+
+  <Target Name="ValidateReleaseVersion" BeforeTargets="GenerateNuspec">
+    <Error Condition="'$(ReleaseVersion)' == ''"
+           Text="ReleaseVersion must be supplied from the release SemVer identity when creating a package." />
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(ReleaseVersion)', '^\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'))"
+           Text="ReleaseVersion must be a SemVer identity." />
+  </Target>
 </Project>
