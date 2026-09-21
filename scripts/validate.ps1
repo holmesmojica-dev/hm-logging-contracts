@@ -20,7 +20,7 @@ function Invoke-ValidationCommand {
         throw "Required command '$Command' was not found on PATH."
     }
 
-    Write-Host "==> $Command $($Arguments -join ' ')"
+    Write-Output "==> $Command $($Arguments -join ' ')"
 
     if ($SuppressOutput) {
         & $Command @Arguments | Out-Null
