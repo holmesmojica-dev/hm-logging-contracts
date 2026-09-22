@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$PackageDirectory,
     [Parameter(Mandatory)][string]$ReleaseVersion,
-    [Parameter(Mandatory)][string]$Commit
+    [Parameter(Mandatory)][string]$Commit,
+    [switch]$SkipSymbolPackage
 )
 
 Set-StrictMode -Version Latest
@@ -14,7 +15,7 @@ $packageName = "HDev.Hm.Logging.Contracts.$ReleaseVersion.nupkg"
 $symbolName = "HDev.Hm.Logging.Contracts.$ReleaseVersion.snupkg"
 $packagePath = Join-Path $packageDirectory $packageName
 $symbolPath = Join-Path $packageDirectory $symbolName
-if (-not (Test-Path $packagePath) -or -not (Test-Path $symbolPath)) { throw 'The expected .nupkg and .snupkg release artifacts were not produced.' }
+if (-not (Test-Path $packagePath) -or (-not $SkipSymbolPackage -and -not (Test-Path $symbolPath))) { throw 'The expected .nupkg and .snupkg release artifacts were not produced.' }
 
 $archive = [System.IO.Compression.ZipFile]::OpenRead($packagePath)
 try {
@@ -30,6 +31,8 @@ try {
 }
 finally { $archive.Dispose() }
 
-$symbols = [System.IO.Compression.ZipFile]::OpenRead($symbolPath)
-try { if (-not ($symbols.Entries.FullName -match '\.pdb$')) { throw 'The symbol package does not contain a portable PDB.' } }
-finally { $symbols.Dispose() }
+if (-not $SkipSymbolPackage) {
+    $symbols = [System.IO.Compression.ZipFile]::OpenRead($symbolPath)
+    try { if (-not ($symbols.Entries.FullName -match '\.pdb$')) { throw 'The symbol package does not contain a portable PDB.' } }
+    finally { $symbols.Dispose() }
+}

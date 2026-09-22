@@ -60,6 +60,9 @@ try {
     Invoke-ValidationCommand -Command pwsh -Arguments @('-NoProfile', '-File', 'tests/ReleaseVersioning.Tests.ps1')
     Invoke-ValidationCommand -Command pwsh -Arguments @('-NoProfile', '-File', 'tests/BsrValidation.Tests.ps1')
     Invoke-ValidationCommand -Command pwsh -Arguments @('-NoProfile', '-File', 'tests/ReleaseArtifactValidation.Tests.ps1')
+    Invoke-ValidationCommand -Command pwsh -Arguments @('-NoProfile', '-File', 'tests/ReleaseArtifactIntegrity.Tests.ps1')
+    Invoke-ValidationCommand -Command pwsh -Arguments @('-NoProfile', '-File', 'tests/NuGetPublication.Tests.ps1')
+    Invoke-ValidationCommand -Command pwsh -Arguments @('-NoProfile', '-File', 'tests/ReleaseWorkflow.Tests.ps1')
     Invoke-ValidationCommand -Command buf -Arguments @('format', 'proto', '--exit-code') -SuppressOutput
     Invoke-ValidationCommand -Command buf -Arguments @('lint')
     Invoke-ValidationCommand -Command buf -Arguments @('build')

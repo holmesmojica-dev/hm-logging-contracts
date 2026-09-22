@@ -21,5 +21,20 @@ for ($attempt = 1; $attempt -le 2; $attempt++) {
 
 $resolved = (& buf registry module commit resolve "${moduleName}:$Tag" --format json --timeout 60s | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0 -or $resolved.commit -cnotmatch '^[0-9a-f]{32}$') { throw 'BSR publication did not resolve to a valid immutable commit ID.' }
-# Point 6 will verify an existing remote label before it may emit already_verified.
+
+$temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "hm-bsr-release-$([Guid]::NewGuid())"
+try {
+    New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
+    $localDescriptor = Join-Path $temporaryDirectory 'local.binpb'
+    $remoteDescriptor = Join-Path $temporaryDirectory 'remote.binpb'
+    & buf build . --as-file-descriptor-set --output $localDescriptor
+    if ($LASTEXITCODE -ne 0) { throw 'Buf could not build the validated local descriptor set.' }
+    & buf build "${moduleName}:$($resolved.commit)" --as-file-descriptor-set --output $remoteDescriptor
+    if ($LASTEXITCODE -ne 0) { throw 'Buf could not build the remote BSR descriptor set.' }
+    if ((Get-FileHash $localDescriptor -Algorithm SHA256).Hash -ne (Get-FileHash $remoteDescriptor -Algorithm SHA256).Hash) { throw 'The immutable BSR commit is not semantically equivalent to the validated local descriptor set.' }
+}
+finally {
+    if (Test-Path $temporaryDirectory) { Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force }
+}
+
 @("release_version=$($Tag.Substring(1))", "source_commit=$Commit", 'bsr_state=published', "bsr_commit_id=$($resolved.commit)") | Add-Content -LiteralPath $GitHubOutputPath

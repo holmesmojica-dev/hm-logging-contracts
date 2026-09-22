@@ -81,26 +81,52 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  prepare-attestation:
-    name: Prepare attestation boundary
-    needs: build-artifact
+  attest-artifacts:
+    name: Attest release artifacts
+    needs: [preflight, build-artifact]
     runs-on: ubuntu-latest
-    outputs:
-      artifact_digest: ${{ needs.build-artifact.outputs.artifact_digest }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - name: Download validated release artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ${{ needs.build-artifact.outputs.artifact_name }}
           path: artifacts/packages
-      - name: Reserve attestation boundary
+      - name: Verify validated artifact integrity
         shell: pwsh
-        run: Write-Output 'Attestation of this immutable artifact is implemented in Stage 4 Point 5.'
+        run: >
+          ./scripts/Assert-ReleaseArtifactManifest.ps1
+          -PackageDirectory artifacts/packages
+          -ReleaseVersion "${{ needs.preflight.outputs.release_version }}"
+      - name: Attest NuGet package
+        id: attest-nupkg
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: artifacts/packages/HDev.Hm.Logging.Contracts.${{ needs.preflight.outputs.release_version }}.nupkg
+      - name: Attest NuGet symbol package
+        id: attest-snupkg
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: artifacts/packages/HDev.Hm.Logging.Contracts.${{ needs.preflight.outputs.release_version }}.snupkg
+      - name: Verify NuGet artifact attestations
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "artifacts/packages/HDev.Hm.Logging.Contracts.${{ needs.preflight.outputs.release_version }}.nupkg" --repo "$env:GITHUB_REPOSITORY" --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/release.yml"
+          gh attestation verify "artifacts/packages/HDev.Hm.Logging.Contracts.${{ needs.preflight.outputs.release_version }}.snupkg" --repo "$env:GITHUB_REPOSITORY" --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/release.yml"
 
   publish-nuget:
     name: Publish NuGet
-    needs: [preflight, build-artifact, prepare-attestation]
+    needs: [preflight, build-artifact, attest-artifacts]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       release_version: ${{ needs.preflight.outputs.release_version }}
       source_commit: ${{ needs.preflight.outputs.source_commit }}
@@ -116,11 +142,22 @@ jobs:
         with:
           name: ${{ needs.build-artifact.outputs.artifact_name }}
           path: artifacts/packages
+      - name: Verify validated artifact integrity
+        shell: pwsh
+        run: >
+          ./scripts/Assert-ReleaseArtifactManifest.ps1
+          -PackageDirectory artifacts/packages
+          -ReleaseVersion "${{ needs.preflight.outputs.release_version }}"
+      - name: Log in to NuGet.org with OIDC
+        id: nuget-login
+        uses: NuGet/login@d22cc5f58ff5b88bf9bd452535b4335137e24544 # v1.1.0
+        with:
+          user: ${{ vars.NUGET_USERNAME }}
       - name: Publish NuGet package
         id: publish
         shell: pwsh
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_TRUSTED_PUBLISHING_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: >
           ./scripts/Publish-NuGetRelease.ps1
           -PackageDirectory artifacts/packages
