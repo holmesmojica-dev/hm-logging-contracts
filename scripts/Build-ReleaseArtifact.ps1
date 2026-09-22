@@ -22,3 +22,4 @@ if ($LASTEXITCODE -ne 0) { throw 'Release artifact restore failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Release artifact packaging failed.' }
 
 & (Join-Path $PSScriptRoot 'Validate-ReleaseArtifact.ps1') -PackageDirectory $outputPath -ReleaseVersion $ReleaseVersion -Commit $Commit
+& (Join-Path $PSScriptRoot 'New-ReleaseArtifactManifest.ps1') -PackageDirectory $outputPath -ReleaseVersion $ReleaseVersion
