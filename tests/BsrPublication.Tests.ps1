@@ -30,59 +30,6 @@ function Get-LoggedCommandIndex {
     return -1
 }
 
-function Get-FakeBufPrecedenceDiagnostics {
-    param(
-        [string]$ExpectedFakeCommandPath,
-        [string]$ResolvedFakeCommandPath,
-        [string]$CanonicalExpectedPath,
-        [string]$CanonicalResolvedPath,
-        [string]$TemporaryDirectory
-    )
-
-    $pathEntries = @($env:Path -split [regex]::Escape([System.IO.Path]::PathSeparator) | Select-Object -First 6) -join [Environment]::NewLine
-    $fakeExists = Test-Path -LiteralPath $ExpectedFakeCommandPath -PathType Leaf
-    $fakeMode = if ($IsWindows) {
-        'Not applicable on Windows.'
-    }
-    else {
-        (& stat -c '%A %a' -- $ExpectedFakeCommandPath 2>&1 | Out-String).Trim()
-    }
-    $applicationCommands = (& pwsh -NoProfile -Command 'Get-Command buf -CommandType Application -All -ErrorAction SilentlyContinue | Select-Object Name, CommandType, Source, Path | Format-List | Out-String' 2>&1 | Out-String).Trim()
-    $commandV = if ($IsWindows) {
-        'Not applicable on Windows.'
-    }
-    else {
-        (& sh -c 'command -v buf' 2>&1 | Out-String).Trim()
-    }
-    $whichAll = if ($IsWindows) {
-        'Not applicable on Windows.'
-    }
-    else {
-        (& sh -c 'which -a buf' 2>&1 | Out-String).Trim()
-    }
-
-    return @"
-IsWindows: $IsWindows
-PSVersionTable.OS: $($PSVersionTable.OS)
-Expected fake command path: $ExpectedFakeCommandPath
-Raw resolved command path: $ResolvedFakeCommandPath
-Canonical expected path: $CanonicalExpectedPath
-Canonical resolved path: $CanonicalResolvedPath
-Temporary directory: $TemporaryDirectory
-Path separator: $([System.IO.Path]::PathSeparator)
-First PATH entries:
-$pathEntries
-Expected fake exists: $fakeExists
-Expected fake mode: $fakeMode
-Fresh child Get-Command buf -CommandType Application -All:
-$applicationCommands
-command -v buf:
-$commandV
-which -a buf:
-$whichAll
-"@
-}
-
 function Get-FakeBufScript {
     return @'
 param([Parameter(ValueFromRemainingArguments = $true)][string[]]$CommandArguments)
@@ -137,7 +84,6 @@ function Invoke-BsrPublicationScenario {
     param([Parameter(Mandatory)][string]$Scenario)
 
     $temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "hm-bsr-publication-test-$([Guid]::NewGuid())"
-    $originalPath = $env:Path
     $originalToken = $env:BUF_TOKEN
     try {
         New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
@@ -168,18 +114,8 @@ exec pwsh -NoProfile -File "$script_dir/fake-buf.ps1" "$@"
         $env:HM_FAKE_BUF_COMMIT_ID = '0123456789abcdef0123456789abcdef'
         $env:HM_FAKE_BUF_SOURCE_URL = Get-HmBsrSourceControlUrl -Commit $sourceCommit
         $env:BUF_TOKEN = 'test-token'
-        $env:Path = "$temporaryDirectory$([System.IO.Path]::PathSeparator)$originalPath"
-        $resolvedFakeCommandOutput = @(& pwsh -NoProfile -Command '$command = Get-Command buf -CommandType Application -ErrorAction Stop | Select-Object -First 1; [Console]::Out.Write($command.Source)')
-        $resolvedFakeCommandPath = if ($resolvedFakeCommandOutput.Count -eq 1) { ([string]$resolvedFakeCommandOutput[0]).Trim() } else { '' }
-        $canonicalFakeCommandPath = try { (Resolve-Path -LiteralPath $fakeCommandPath -ErrorAction Stop).ProviderPath } catch { "Unresolvable: $($_.Exception.Message)" }
-        $canonicalResolvedCommandPath = try { (Resolve-Path -LiteralPath $resolvedFakeCommandPath -ErrorAction Stop).ProviderPath } catch { "Unresolvable: $($_.Exception.Message)" }
-        $pathComparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-        if ($LASTEXITCODE -ne 0 -or $resolvedFakeCommandOutput.Count -ne 1 -or -not [string]::Equals($canonicalResolvedCommandPath, $canonicalFakeCommandPath, $pathComparison)) {
-            $diagnostics = Get-FakeBufPrecedenceDiagnostics -ExpectedFakeCommandPath $fakeCommandPath -ResolvedFakeCommandPath $resolvedFakeCommandPath -CanonicalExpectedPath $canonicalFakeCommandPath -CanonicalResolvedPath $canonicalResolvedCommandPath -TemporaryDirectory $temporaryDirectory
-            throw "The fake Buf command does not take precedence on PATH.$([Environment]::NewLine)$diagnostics"
-        }
 
-        & pwsh -NoProfile -File (Join-Path $PSScriptRoot '..\scripts\Publish-BsrRelease.ps1') -Tag 'v1.0.0-preview.1' -Commit $sourceCommit -GitHubOutputPath $outputPath *> $null
+        & pwsh -NoProfile -File (Join-Path $PSScriptRoot '..\scripts\Publish-BsrRelease.ps1') -Tag 'v1.0.0-preview.1' -Commit $sourceCommit -GitHubOutputPath $outputPath -BufCommand $fakeCommandPath *> $null
         $exitCode = $LASTEXITCODE
         return [pscustomobject]@{
             ExitCode = $exitCode
@@ -188,7 +124,6 @@ exec pwsh -NoProfile -File "$script_dir/fake-buf.ps1" "$@"
         }
     }
     finally {
-        $env:Path = $originalPath
         $env:BUF_TOKEN = $originalToken
         Remove-Item Env:HM_FAKE_BUF_SCENARIO -ErrorAction SilentlyContinue
         Remove-Item Env:HM_FAKE_BUF_LOG -ErrorAction SilentlyContinue
@@ -219,7 +154,8 @@ Assert-Throws { Assert-HmBsrCommitSourceIdentity -CommitId $commitId -ExpectedSo
 Assert-Throws { Assert-HmBsrCommitSourceIdentity -CommitId $commitId -ExpectedSourceControlUrl $sourceControlUrl -ExitCode 0 -Output @("{`"commit`":`"$commitId`",`"source_control_url`":`"https://example.invalid/other`"}") }
 
 $publicationScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\scripts\Publish-BsrRelease.ps1') -Raw
-Assert-Equal $true ($publicationScript.IndexOf('Resolve-BsrReleaseCommit -Reference $reference') -lt $publicationScript.IndexOf('& buf push'))
+Assert-Equal $true ($publicationScript.IndexOf('Resolve-BsrReleaseCommit -Reference $reference') -lt $publicationScript.IndexOf('& $BufCommand push'))
+Assert-Equal $true ($publicationScript -match '\[string\]\$BufCommand = ''buf''')
 Assert-Equal $true ($publicationScript -match 'if \(\$lookup\.State -eq ''absent''\)')
 Assert-Equal $true ($publicationScript -match 'Assert-BsrReleaseCommit')
 Assert-Equal $true ($publicationScript -match 'bsr_state=\$state')

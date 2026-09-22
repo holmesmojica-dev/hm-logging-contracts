@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$Tag,
     [Parameter(Mandatory)][string]$Commit,
-    [Parameter(Mandatory)][string]$GitHubOutputPath
+    [Parameter(Mandatory)][string]$GitHubOutputPath,
+    [string]$BufCommand = 'buf'
 )
 
 Set-StrictMode -Version Latest
@@ -13,7 +14,7 @@ Import-Module (Join-Path $PSScriptRoot 'BsrPublication.psm1') -Force
 function Invoke-BufJsonCommand {
     param([Parameter(Mandatory)][string[]]$Arguments)
 
-    $output = @(& buf @Arguments 2>&1 | ForEach-Object { $_.ToString() })
+    $output = @(& $BufCommand @Arguments 2>&1 | ForEach-Object { $_.ToString() })
     return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
 }
 
@@ -39,9 +40,9 @@ function Assert-BsrReleaseCommit {
         New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
         $localDescriptor = Join-Path $temporaryDirectory 'local.binpb'
         $remoteDescriptor = Join-Path $temporaryDirectory 'remote.binpb'
-        & buf build . --as-file-descriptor-set --output $localDescriptor
+        & $BufCommand build . --as-file-descriptor-set --output $localDescriptor
         if ($LASTEXITCODE -ne 0) { throw 'Buf could not build the validated local descriptor set.' }
-        & buf build "${ModuleName}:$CommitId" --as-file-descriptor-set --output $remoteDescriptor
+        & $BufCommand build "${ModuleName}:$CommitId" --as-file-descriptor-set --output $remoteDescriptor
         if ($LASTEXITCODE -ne 0) { throw 'Buf could not build the remote BSR descriptor set.' }
         if ((Get-FileHash $localDescriptor -Algorithm SHA256).Hash -ne (Get-FileHash $remoteDescriptor -Algorithm SHA256).Hash) { throw 'The immutable BSR commit is not semantically equivalent to the validated local descriptor set.' }
     }
@@ -58,7 +59,7 @@ $lookup = Resolve-BsrReleaseCommit -Reference $reference
 
 if ($lookup.State -eq 'absent') {
     for ($attempt = 1; $attempt -le 2; $attempt++) {
-        & buf push --label $Tag --source-control-url $sourceUrl --timeout 60s
+        & $BufCommand push --label $Tag --source-control-url $sourceUrl --timeout 60s
         if ($LASTEXITCODE -eq 0) { break }
         if ($attempt -eq 2) { throw 'BSR publication failed after two attempts.' }
         Start-Sleep -Seconds 10
