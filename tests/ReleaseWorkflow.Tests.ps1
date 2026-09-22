@@ -9,6 +9,24 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
+function Get-ReleaseJobBlock {
+    param([Parameter(Mandatory)][string]$Workflow, [Parameter(Mandatory)][string]$JobName)
+
+    $match = [regex]::Match($Workflow, "(?ms)^  $([regex]::Escape($JobName)):\r?\n(.*?)(?=^  [a-z][a-z-]*:\r?\n|\z)")
+    if (-not $match.Success) { throw "Release workflow job '$JobName' was not found." }
+    return $match.Groups[1].Value
+}
+
+function Assert-CheckoutBeforeRepositoryScripts {
+    param([Parameter(Mandatory)][string]$JobName, [Parameter(Mandatory)][string]$JobBlock)
+
+    $firstScriptIndex = $JobBlock.IndexOf('./scripts/', [System.StringComparison]::Ordinal)
+    if ($firstScriptIndex -lt 0) { return }
+
+    $checkoutIndex = $JobBlock.IndexOf('uses: actions/checkout@', [System.StringComparison]::Ordinal)
+    Assert-True ($checkoutIndex -ge 0 -and $checkoutIndex -lt $firstScriptIndex) "Release job '$JobName' must check out the repository before its first repository-local script."
+}
+
 $repositoryRoot = (& git rev-parse --show-toplevel).Trim()
 $workflow = Get-Content -LiteralPath (Join-Path $repositoryRoot '.github/workflows/release.yml') -Raw
 $buildScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Build-ReleaseArtifact.ps1') -Raw
@@ -20,12 +38,26 @@ $publishGitHubReleaseScript = Get-Content -LiteralPath (Join-Path $repositoryRoo
 $gitHubReleaseModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/GitHubRelease.psm1') -Raw
 $validationScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/validate.ps1') -Raw
 $triggerBlock = [regex]::Match($workflow, '(?ms)^on:\s*\r?\n(.*?)(?=^permissions:)').Value
+$releaseJobBlocks = @{}
+foreach ($jobMatch in [regex]::Matches($workflow, '(?ms)^  ([a-z][a-z-]*):\r?\n(.*?)(?=^  [a-z][a-z-]*:\r?\n|\z)')) {
+    $jobName = $jobMatch.Groups[1].Value
+    $jobBlock = $jobMatch.Groups[2].Value
+    if ($jobBlock.Contains('./scripts/', [System.StringComparison]::Ordinal)) {
+        $releaseJobBlocks[$jobName] = $jobBlock
+        Assert-CheckoutBeforeRepositoryScripts -JobName $jobName -JobBlock $jobBlock
+    }
+}
 
 Assert-True ($triggerBlock -match '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+tags:\s*\r?\n\s+- ''v\*''') 'The official release workflow must trigger only for v-prefixed pushed tags.'
 Assert-True ($triggerBlock -notmatch 'branches:|pull_request:|workflow_dispatch:|schedule:|repository_dispatch:') 'The official release workflow must not expose alternate publication triggers.'
 Assert-True ($workflow -match '(?ms)^  preflight:.*?uses: actions/checkout@.*?fetch-depth: 0.*?Resolve release identity') 'Release preflight must fetch complete branch and tag history.'
 Assert-True ($workflow -match '(?ms)Resolve release identity.*?Resolve-ReleaseVersion\.ps1.*?-Tag "\$env:GITHUB_REF_NAME".*?-MainBranch ''origin/main''') 'Tag-triggered release identity resolution must validate against the fetched origin/main reference.'
 Assert-True ($workflow -match '(?ms)Validate deterministic BSR prerequisites.*?Validate-BsrRelease\.ps1.*?-Tag.*?steps\.release\.outputs\.release_tag.*?-LastBsrCommitId.*?LAST_BSR_COMMIT_ID.*?-MainBranch ''origin/main''') 'Tag-triggered BSR preflight must validate against the fetched origin/main reference.'
+Assert-True ($releaseJobBlocks['attest-artifacts'] -match '(?ms)uses: actions/checkout@.*?ref: \$\{\{ needs\.preflight\.outputs\.source_commit \}\}.*?Download validated release artifact.*?Verify validated artifact integrity') 'Attestation must check out the immutable source before downloading and verifying the artifact.'
+Assert-True ($releaseJobBlocks['publish-nuget'] -match '(?ms)uses: actions/checkout@.*?ref: \$\{\{ needs\.preflight\.outputs\.source_commit \}\}.*?Download validated release artifact.*?Verify validated artifact integrity.*?Resolve NuGet release state') 'NuGet publication must check out the immutable source before artifact verification and resolution.'
+Assert-True ($releaseJobBlocks['publish-bsr'] -match '(?ms)uses: actions/checkout@.*?ref: \$\{\{ needs\.preflight\.outputs\.source_commit \}\}.*?fetch-depth: 0.*?Publish BSR module') 'BSR publication must retain its full-history immutable-source checkout.'
+Assert-True ($releaseJobBlocks['persist-bsr-state'] -match '(?ms)uses: actions/checkout@.*?ref: \$\{\{ needs\.publish-bsr\.outputs\.source_commit \}\}.*?Persist immutable BSR commit') 'Baseline persistence must check out the immutable BSR source before its repository-local script.'
+Assert-True ($releaseJobBlocks['post-publication'] -match '(?ms)uses: actions/checkout@.*?ref: \$\{\{ needs\.preflight\.outputs\.source_commit \}\}.*?Create or verify GitHub Release') 'GitHub Release creation must check out the immutable source before its repository-local script.'
 Assert-True ($workflow -match '(?ms)^  build-artifact:.*?Build and validate release package.*?Upload immutable release artifact') 'The release workflow must build and validate the release artifact before uploading it.'
 Assert-True ($buildScript -match 'Validate-ReleaseArtifact\.ps1') 'Release artifact production must validate its package before transport.'
 Assert-True ($workflow -match '(?ms)^  attest-artifacts:.*?needs: \[preflight, build-artifact\].*?Verify validated artifact integrity') 'Attestation must depend on the validated build artifact and verify its integrity.'

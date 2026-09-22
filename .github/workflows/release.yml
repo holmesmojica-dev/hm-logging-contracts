@@ -92,6 +92,10 @@ jobs:
       attestations: write
       artifact-metadata: write
     steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.preflight.outputs.source_commit }}
       - name: Download validated release artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -133,6 +137,10 @@ jobs:
       source_commit: ${{ needs.preflight.outputs.source_commit }}
       nuget_state: ${{ steps.resolve.outputs.nuget_state == 'already_verified' && steps.resolve.outputs.nuget_state || steps.publish.outputs.nuget_state }}
     steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.preflight.outputs.source_commit }}
       - name: Set up .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
@@ -214,6 +222,10 @@ jobs:
     if: needs.publish-bsr.outputs.bsr_state == 'published' || needs.publish-bsr.outputs.bsr_state == 'already_verified'
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.publish-bsr.outputs.source_commit }}
       - name: Persist immutable BSR commit
         shell: pwsh
         env:
@@ -227,6 +239,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.preflight.outputs.source_commit }}
       - name: Create or verify GitHub Release
         shell: pwsh
         env:
