@@ -30,6 +30,59 @@ function Get-LoggedCommandIndex {
     return -1
 }
 
+function Get-FakeBufPrecedenceDiagnostics {
+    param(
+        [string]$ExpectedFakeCommandPath,
+        [string]$ResolvedFakeCommandPath,
+        [string]$CanonicalExpectedPath,
+        [string]$CanonicalResolvedPath,
+        [string]$TemporaryDirectory
+    )
+
+    $pathEntries = @($env:Path -split [regex]::Escape([System.IO.Path]::PathSeparator) | Select-Object -First 6) -join [Environment]::NewLine
+    $fakeExists = Test-Path -LiteralPath $ExpectedFakeCommandPath -PathType Leaf
+    $fakeMode = if ($IsWindows) {
+        'Not applicable on Windows.'
+    }
+    else {
+        (& stat -c '%A %a' -- $ExpectedFakeCommandPath 2>&1 | Out-String).Trim()
+    }
+    $applicationCommands = (& pwsh -NoProfile -Command 'Get-Command buf -CommandType Application -All -ErrorAction SilentlyContinue | Select-Object Name, CommandType, Source, Path | Format-List | Out-String' 2>&1 | Out-String).Trim()
+    $commandV = if ($IsWindows) {
+        'Not applicable on Windows.'
+    }
+    else {
+        (& sh -c 'command -v buf' 2>&1 | Out-String).Trim()
+    }
+    $whichAll = if ($IsWindows) {
+        'Not applicable on Windows.'
+    }
+    else {
+        (& sh -c 'which -a buf' 2>&1 | Out-String).Trim()
+    }
+
+    return @"
+IsWindows: $IsWindows
+PSVersionTable.OS: $($PSVersionTable.OS)
+Expected fake command path: $ExpectedFakeCommandPath
+Raw resolved command path: $ResolvedFakeCommandPath
+Canonical expected path: $CanonicalExpectedPath
+Canonical resolved path: $CanonicalResolvedPath
+Temporary directory: $TemporaryDirectory
+Path separator: $([System.IO.Path]::PathSeparator)
+First PATH entries:
+$pathEntries
+Expected fake exists: $fakeExists
+Expected fake mode: $fakeMode
+Fresh child Get-Command buf -CommandType Application -All:
+$applicationCommands
+command -v buf:
+$commandV
+which -a buf:
+$whichAll
+"@
+}
+
 function Get-FakeBufScript {
     return @'
 param([Parameter(ValueFromRemainingArguments = $true)][string[]]$CommandArguments)
@@ -117,13 +170,13 @@ exec pwsh -NoProfile -File "$script_dir/fake-buf.ps1" "$@"
         $env:BUF_TOKEN = 'test-token'
         $env:Path = "$temporaryDirectory$([System.IO.Path]::PathSeparator)$originalPath"
         $resolvedFakeCommandOutput = @(& pwsh -NoProfile -Command '$command = Get-Command buf -CommandType Application -ErrorAction Stop | Select-Object -First 1; [Console]::Out.Write($command.Source)')
-        if ($LASTEXITCODE -ne 0 -or $resolvedFakeCommandOutput.Count -ne 1) { throw 'The fake Buf command does not take precedence on PATH.' }
-        $resolvedFakeCommandPath = ([string]$resolvedFakeCommandOutput[0]).Trim()
-        $canonicalFakeCommandPath = (Resolve-Path -LiteralPath $fakeCommandPath -ErrorAction Stop).ProviderPath
-        $canonicalResolvedCommandPath = (Resolve-Path -LiteralPath $resolvedFakeCommandPath -ErrorAction Stop).ProviderPath
+        $resolvedFakeCommandPath = if ($resolvedFakeCommandOutput.Count -eq 1) { ([string]$resolvedFakeCommandOutput[0]).Trim() } else { '' }
+        $canonicalFakeCommandPath = try { (Resolve-Path -LiteralPath $fakeCommandPath -ErrorAction Stop).ProviderPath } catch { "Unresolvable: $($_.Exception.Message)" }
+        $canonicalResolvedCommandPath = try { (Resolve-Path -LiteralPath $resolvedFakeCommandPath -ErrorAction Stop).ProviderPath } catch { "Unresolvable: $($_.Exception.Message)" }
         $pathComparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-        if (-not [string]::Equals($canonicalResolvedCommandPath, $canonicalFakeCommandPath, $pathComparison)) {
-            throw 'The fake Buf command does not take precedence on PATH.'
+        if ($LASTEXITCODE -ne 0 -or $resolvedFakeCommandOutput.Count -ne 1 -or -not [string]::Equals($canonicalResolvedCommandPath, $canonicalFakeCommandPath, $pathComparison)) {
+            $diagnostics = Get-FakeBufPrecedenceDiagnostics -ExpectedFakeCommandPath $fakeCommandPath -ResolvedFakeCommandPath $resolvedFakeCommandPath -CanonicalExpectedPath $canonicalFakeCommandPath -CanonicalResolvedPath $canonicalResolvedCommandPath -TemporaryDirectory $temporaryDirectory
+            throw "The fake Buf command does not take precedence on PATH.$([Environment]::NewLine)$diagnostics"
         }
 
         & pwsh -NoProfile -File (Join-Path $PSScriptRoot '..\scripts\Publish-BsrRelease.ps1') -Tag 'v1.0.0-preview.1' -Commit $sourceCommit -GitHubOutputPath $outputPath *> $null
