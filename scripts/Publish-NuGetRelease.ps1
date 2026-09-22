@@ -17,37 +17,15 @@ if ($candidates.Count -ne 1 -or $candidates[0].Name -cne $packageName) {
     throw "Expected exactly one release package named '$packageName'."
 }
 
+if ([string]::IsNullOrWhiteSpace($env:NUGET_TRUSTED_PUBLISHING_API_KEY)) { throw 'NUGET_TRUSTED_PUBLISHING_API_KEY must be supplied for NuGet publication.' }
+& dotnet nuget push $candidates[0].FullName --api-key $env:NUGET_TRUSTED_PUBLISHING_API_KEY --source 'https://api.nuget.org/v3/index.json'
+if ($LASTEXITCODE -ne 0) { throw "NuGet publication failed for '$packageName'." }
+
 $temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "hm-nuget-release-$([Guid]::NewGuid())"
 $remotePackage = Join-Path $temporaryDirectory $packageName
 $packageUri = Get-HmNuGetPackageUri -ReleaseVersion $ReleaseVersion
 try {
     New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
-    $exists = $false
-    try {
-        Invoke-WebRequest -Uri $packageUri -OutFile $remotePackage -TimeoutSec 30
-        $exists = $true
-    }
-    catch {
-        $statusCode = if ($null -ne $_.Exception.Response) { $_.Exception.Response.StatusCode } else { $null }
-        if (-not (Test-HmNuGetNotFoundStatusCode -StatusCode $statusCode)) { throw }
-    }
-
-    if ($exists) {
-        try {
-            & (Join-Path $PSScriptRoot 'Validate-ReleaseArtifact.ps1') -PackageDirectory $temporaryDirectory -ReleaseVersion $ReleaseVersion -Commit $Commit -SkipSymbolPackage
-            $identityMatches = $true
-        }
-        catch { $identityMatches = $false }
-        $decision = Resolve-HmNuGetVerificationDecision -PackageExists $true -IdentityMatches $identityMatches
-        @("release_version=$ReleaseVersion", "source_commit=$Commit", "nuget_state=$decision") | Add-Content -LiteralPath $GitHubOutputPath
-        return
-    }
-
-    Resolve-HmNuGetVerificationDecision -PackageExists $false -IdentityMatches $false | Out-Null
-    if ([string]::IsNullOrWhiteSpace($env:NUGET_TRUSTED_PUBLISHING_API_KEY)) { throw 'NUGET_TRUSTED_PUBLISHING_API_KEY must be supplied for NuGet publication.' }
-    & dotnet nuget push $candidates[0].FullName --api-key $env:NUGET_TRUSTED_PUBLISHING_API_KEY --source 'https://api.nuget.org/v3/index.json'
-    if ($LASTEXITCODE -ne 0) { throw "NuGet publication failed for '$packageName'." }
-
     for ($attempt = 1; $attempt -le 60; $attempt++) {
         $available = $false
         try {

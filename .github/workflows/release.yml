@@ -130,8 +130,7 @@ jobs:
     outputs:
       release_version: ${{ needs.preflight.outputs.release_version }}
       source_commit: ${{ needs.preflight.outputs.source_commit }}
-      # Point 4 emits only published. Point 6 will safely add already_verified.
-      nuget_state: ${{ steps.publish.outputs.nuget_state }}
+      nuget_state: ${{ steps.resolve.outputs.nuget_state == 'already_verified' && steps.resolve.outputs.nuget_state || steps.publish.outputs.nuget_state }}
     steps:
       - name: Set up .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
@@ -148,13 +147,24 @@ jobs:
           ./scripts/Assert-ReleaseArtifactManifest.ps1
           -PackageDirectory artifacts/packages
           -ReleaseVersion "${{ needs.preflight.outputs.release_version }}"
+      - name: Resolve NuGet release state
+        id: resolve
+        shell: pwsh
+        run: >
+          ./scripts/Resolve-NuGetRelease.ps1
+          -PackageDirectory artifacts/packages
+          -ReleaseVersion "${{ needs.preflight.outputs.release_version }}"
+          -Commit "${{ needs.preflight.outputs.source_commit }}"
+          -GitHubOutputPath "$env:GITHUB_OUTPUT"
       - name: Log in to NuGet.org with OIDC
         id: nuget-login
+        if: steps.resolve.outputs.nuget_state == 'publish'
         uses: NuGet/login@d22cc5f58ff5b88bf9bd452535b4335137e24544 # v1.1.0
         with:
           user: ${{ vars.NUGET_USERNAME }}
       - name: Publish NuGet package
         id: publish
+        if: steps.resolve.outputs.nuget_state == 'publish'
         shell: pwsh
         env:
           NUGET_TRUSTED_PUBLISHING_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
@@ -173,7 +183,6 @@ jobs:
     outputs:
       release_version: ${{ needs.preflight.outputs.release_version }}
       source_commit: ${{ needs.preflight.outputs.source_commit }}
-      # Point 4 emits only published. Point 6 will safely add already_verified.
       bsr_state: ${{ steps.publish.outputs.bsr_state }}
       bsr_commit_id: ${{ steps.publish.outputs.bsr_commit_id }}
     steps:
