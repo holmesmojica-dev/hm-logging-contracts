@@ -220,10 +220,18 @@ jobs:
         run: ./scripts/Update-BsrBaseline.ps1 -CommitId "${{ needs.publish-bsr.outputs.bsr_commit_id }}"
 
   post-publication:
-    name: Post-publication boundary
-    needs: [publish-nuget, publish-bsr, persist-bsr-state]
+    name: Create GitHub Release
+    needs: [preflight, build-artifact, attest-artifacts, publish-nuget, publish-bsr, persist-bsr-state]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Reserve release record boundary
+      - name: Create or verify GitHub Release
         shell: pwsh
-        run: Write-Output 'GitHub Release and release notes are deferred to a later Stage 4 point.'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          ./scripts/Publish-GitHubRelease.ps1
+          -Tag "${{ needs.preflight.outputs.release_tag }}"
+          -ReleaseVersion "${{ needs.preflight.outputs.release_version }}"
+          -Repository "$env:GITHUB_REPOSITORY"
