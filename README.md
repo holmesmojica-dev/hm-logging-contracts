@@ -213,9 +213,9 @@ compiles them in consumer projects. Google protobuf schemas, including
 `google.type.Decimal`, remain external dependencies and are not repackaged as
 HM-owned content.
 
-The Buf Schema Registry is the intended language-neutral distribution channel
-when the module is published. Contracts v1 is not currently published to BSR;
-Git remains the canonical source for HM-owned schemas.
+The Buf Schema Registry distributes and provides language-neutral discovery for
+the HM-owned protobuf schemas through `buf.build/hdev-hm/logging`. Git remains
+the authoritative source and history for the schemas.
 
 ## Compatibility and versioning
 

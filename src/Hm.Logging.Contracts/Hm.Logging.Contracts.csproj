@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <PackageId>HDev.Hm.Logging.Contracts</PackageId>
+    <Title>Hm.Logging.Contracts</Title>
     <Authors>Holmes Mojica</Authors>
     <Company>Holmes Mojica Dev</Company>
     <Description>Language-neutral Protocol Buffers and gRPC contracts for the HM Logging ecosystem.</Description>
