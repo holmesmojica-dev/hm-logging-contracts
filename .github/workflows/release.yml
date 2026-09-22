@@ -42,6 +42,7 @@ jobs:
           ./scripts/Validate-BsrRelease.ps1
           -Tag "${{ steps.release.outputs.release_tag }}"
           -LastBsrCommitId "$env:LAST_BSR_COMMIT_ID"
+          -MainBranch 'origin/main'
       - name: Validate BSR authentication
         shell: pwsh
         env:

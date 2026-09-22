@@ -43,6 +43,17 @@ function Assert-Throws {
     throw "$Message Expected an exception."
 }
 
+$releaseVersioningModule = (Resolve-Path (Join-Path $PSScriptRoot '..\scripts\ReleaseVersioning.psm1')).Path
+$bsrValidationModule = (Resolve-Path (Join-Path $PSScriptRoot '..\scripts\BsrValidation.psm1')).Path
+$childCommand = @"
+Import-Module '$releaseVersioningModule' -Force
+Import-Module '$bsrValidationModule' -Force
+Get-Command Resolve-HmReleaseContext -ErrorAction Stop | Out-Null
+"@
+$encodedChildCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childCommand))
+& pwsh -NoProfile -EncodedCommand $encodedChildCommand
+Assert-Equal -Expected 0 -Actual $LASTEXITCODE -Message 'A fresh PowerShell process lost Resolve-HmReleaseContext after importing BsrValidation.'
+
 $initial = Resolve-HmBsrCompatibilityBaseline -LastBsrCommitId 'INITIAL'
 Assert-Equal -Expected 'Initial' -Actual $initial.Mode -Message 'INITIAL did not select the explicit first-baseline mode.'
 

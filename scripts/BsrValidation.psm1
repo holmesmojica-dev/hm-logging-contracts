@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-Import-Module (Join-Path $PSScriptRoot 'ReleaseVersioning.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ReleaseVersioning.psm1')
 
 $HmBsrModuleName = 'buf.build/hdev-hm/logging'
 $HmInitialBsrCommitId = 'INITIAL'
