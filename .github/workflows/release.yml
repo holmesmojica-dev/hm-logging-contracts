@@ -1,0 +1,183 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hm-logging-contracts-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.release.outputs.release_version }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      source_commit: ${{ steps.release.outputs.tag_commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Set up Buf
+        uses: bufbuild/buf-action@8c6a16e16f12ba20b6470afa9c2ba9b5ba8c97c3 # v1.5.0
+        with:
+          version: 1.73.0
+          setup_only: true
+      - name: Resolve release identity
+        id: release
+        shell: pwsh
+        run: ./scripts/Resolve-ReleaseVersion.ps1 -Tag "$env:GITHUB_REF_NAME" -GitHubOutputPath "$env:GITHUB_OUTPUT"
+      - name: Validate deterministic BSR prerequisites
+        shell: pwsh
+        env:
+          LAST_BSR_COMMIT_ID: ${{ vars.LAST_BSR_COMMIT_ID }}
+        run: >
+          ./scripts/Validate-BsrRelease.ps1
+          -Tag "${{ steps.release.outputs.release_tag }}"
+          -LastBsrCommitId "$env:LAST_BSR_COMMIT_ID"
+      - name: Validate BSR authentication
+        shell: pwsh
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: ./scripts/Validate-BsrAuthentication.ps1
+
+  build-artifact:
+    name: Build release artifact
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: release-packages
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.preflight.outputs.source_commit }}
+          fetch-depth: 0
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Build and validate release package
+        shell: pwsh
+        run: >
+          ./scripts/Build-ReleaseArtifact.ps1
+          -ReleaseVersion "${{ needs.preflight.outputs.release_version }}"
+          -Commit "${{ needs.preflight.outputs.source_commit }}"
+          -OutputDirectory artifacts/packages
+      - name: Upload immutable release artifact
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-packages
+          path: artifacts/packages
+          if-no-files-found: error
+          retention-days: 7
+
+  prepare-attestation:
+    name: Prepare attestation boundary
+    needs: build-artifact
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_digest: ${{ needs.build-artifact.outputs.artifact_digest }}
+    steps:
+      - name: Download validated release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.build-artifact.outputs.artifact_name }}
+          path: artifacts/packages
+      - name: Reserve attestation boundary
+        shell: pwsh
+        run: Write-Output 'Attestation of this immutable artifact is implemented in Stage 4 Point 5.'
+
+  publish-nuget:
+    name: Publish NuGet
+    needs: [preflight, build-artifact, prepare-attestation]
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ needs.preflight.outputs.release_version }}
+      source_commit: ${{ needs.preflight.outputs.source_commit }}
+      # Point 4 emits only published. Point 6 will safely add already_verified.
+      nuget_state: ${{ steps.publish.outputs.nuget_state }}
+    steps:
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Download validated release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.build-artifact.outputs.artifact_name }}
+          path: artifacts/packages
+      - name: Publish NuGet package
+        id: publish
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: >
+          ./scripts/Publish-NuGetRelease.ps1
+          -PackageDirectory artifacts/packages
+          -ReleaseVersion "${{ needs.preflight.outputs.release_version }}"
+          -Commit "${{ needs.preflight.outputs.source_commit }}"
+          -GitHubOutputPath "$env:GITHUB_OUTPUT"
+
+  publish-bsr:
+    name: Publish BSR
+    needs: [preflight, publish-nuget]
+    if: needs.publish-nuget.outputs.nuget_state == 'published' || needs.publish-nuget.outputs.nuget_state == 'already_verified'
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ needs.preflight.outputs.release_version }}
+      source_commit: ${{ needs.preflight.outputs.source_commit }}
+      # Point 4 emits only published. Point 6 will safely add already_verified.
+      bsr_state: ${{ steps.publish.outputs.bsr_state }}
+      bsr_commit_id: ${{ steps.publish.outputs.bsr_commit_id }}
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.preflight.outputs.source_commit }}
+          fetch-depth: 0
+      - name: Set up Buf
+        uses: bufbuild/buf-action@8c6a16e16f12ba20b6470afa9c2ba9b5ba8c97c3 # v1.5.0
+        with:
+          version: 1.73.0
+          setup_only: true
+      - name: Publish BSR module
+        id: publish
+        shell: pwsh
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: >
+          ./scripts/Publish-BsrRelease.ps1
+          -Tag "${{ needs.preflight.outputs.release_tag }}"
+          -Commit "${{ needs.preflight.outputs.source_commit }}"
+          -GitHubOutputPath "$env:GITHUB_OUTPUT"
+
+  persist-bsr-state:
+    name: Persist BSR state
+    needs: [publish-nuget, publish-bsr]
+    if: needs.publish-bsr.outputs.bsr_state == 'published' || needs.publish-bsr.outputs.bsr_state == 'already_verified'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Persist immutable BSR commit
+        shell: pwsh
+        env:
+          GH_VARIABLES_TOKEN: ${{ secrets.GH_VARIABLES_TOKEN }}
+        run: ./scripts/Update-BsrBaseline.ps1 -CommitId "${{ needs.publish-bsr.outputs.bsr_commit_id }}"
+
+  post-publication:
+    name: Post-publication boundary
+    needs: [publish-nuget, publish-bsr, persist-bsr-state]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reserve release record boundary
+        shell: pwsh
+        run: Write-Output 'GitHub Release and release notes are deferred to a later Stage 4 point.'
