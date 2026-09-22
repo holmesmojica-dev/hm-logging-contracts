@@ -78,6 +78,8 @@ foreach ($releaseVersion in @('0.0.0', '1.0.0-alpha.1')) {
 }
 
 $temporaryRepository = Join-Path ([System.IO.Path]::GetTempPath()) "hm-release-versioning-$([Guid]::NewGuid())"
+$temporaryRemote = Join-Path ([System.IO.Path]::GetTempPath()) "hm-release-versioning-origin-$([Guid]::NewGuid()).git"
+$temporaryTagCheckout = Join-Path ([System.IO.Path]::GetTempPath()) "hm-release-versioning-checkout-$([Guid]::NewGuid())"
 try {
     New-Item -ItemType Directory -Path $temporaryRepository | Out-Null
 
@@ -110,8 +112,32 @@ try {
     Assert-Throws -Action { Assert-HmCommitInMainHistory -RepositoryPath $temporaryRepository -Commit $outsideCommit -MainBranch main } -Message 'A commit outside main history was accepted.'
     Assert-Throws -Action { Resolve-HmReleaseContext -RepositoryPath $temporaryRepository -Tag v1.0.1 -MainBranch main } -Message 'A tag outside main history was accepted.'
     Assert-Throws -Action { Assert-HmCheckedOutCommit -RepositoryPath $temporaryRepository -Commit $mainHeadCommit } -Message 'A checked-out commit different from the expected release commit was accepted.'
+
+    & git init --bare $temporaryRemote *> $null
+    & git -C $temporaryRepository remote add origin $temporaryRemote
+    & git -C $temporaryRepository push origin main --tags *> $null
+
+    & git init $temporaryTagCheckout *> $null
+    & git -C $temporaryTagCheckout remote add origin $temporaryRemote
+    & git -C $temporaryTagCheckout fetch origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' *> $null
+    & git -C $temporaryTagCheckout checkout --detach v1.0.0-preview.1 *> $null
+
+    & git -C $temporaryTagCheckout show-ref --verify --quiet refs/heads/main
+    Assert-Equal -Expected 1 -Actual $LASTEXITCODE -Message 'The simulated tag checkout unexpectedly created a local main branch.'
+    & git -C $temporaryTagCheckout show-ref --verify --quiet refs/remotes/origin/main
+    Assert-Equal -Expected 0 -Actual $LASTEXITCODE -Message 'The simulated tag checkout did not fetch origin/main.'
+
+    $tagCheckoutContext = Resolve-HmReleaseContext -RepositoryPath $temporaryTagCheckout -Tag v1.0.0-preview.1 -MainBranch origin/main
+    Assert-Equal -Expected $ancestorCommit -Actual $tagCheckoutContext.Commit -Message 'A detached tag checkout did not accept an ancestor of origin/main.'
+    Assert-Throws -Action { Resolve-HmReleaseContext -RepositoryPath $temporaryTagCheckout -Tag v1.0.1 -MainBranch origin/main } -Message 'A detached tag checkout accepted an off-main tag.'
 }
 finally {
+    if (Test-Path $temporaryTagCheckout) {
+        Remove-Item -LiteralPath $temporaryTagCheckout -Recurse -Force
+    }
+    if (Test-Path $temporaryRemote) {
+        Remove-Item -LiteralPath $temporaryRemote -Recurse -Force
+    }
     if (Test-Path $temporaryRepository) {
         Remove-Item -LiteralPath $temporaryRepository -Recurse -Force
     }
