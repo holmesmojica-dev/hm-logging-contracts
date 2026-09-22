@@ -15,8 +15,13 @@ $buildScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Buil
 $publishScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Publish-NuGetRelease.ps1') -Raw
 $resolveNuGetScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Resolve-NuGetRelease.ps1') -Raw
 $publishBsrScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Publish-BsrRelease.ps1') -Raw
+$publishGitHubReleaseScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Publish-GitHubRelease.ps1') -Raw
+$gitHubReleaseModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/GitHubRelease.psm1') -Raw
 $validationScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/validate.ps1') -Raw
+$triggerBlock = [regex]::Match($workflow, '(?ms)^on:\s*\r?\n(.*?)(?=^permissions:)').Value
 
+Assert-True ($triggerBlock -match '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+tags:\s*\r?\n\s+- ''v\*''') 'The official release workflow must trigger only for v-prefixed pushed tags.'
+Assert-True ($triggerBlock -notmatch 'branches:|pull_request:|workflow_dispatch:|schedule:|repository_dispatch:') 'The official release workflow must not expose alternate publication triggers.'
 Assert-True ($workflow -match '(?ms)^  build-artifact:.*?Build and validate release package.*?Upload immutable release artifact') 'The release workflow must build and validate the release artifact before uploading it.'
 Assert-True ($buildScript -match 'Validate-ReleaseArtifact\.ps1') 'Release artifact production must validate its package before transport.'
 Assert-True ($workflow -match '(?ms)^  attest-artifacts:.*?needs: \[preflight, build-artifact\].*?Verify validated artifact integrity') 'Attestation must depend on the validated build artifact and verify its integrity.'
@@ -42,6 +47,16 @@ Assert-True ($publishBsrScript -match '\[string\]\$BufCommand = ''buf''') 'BSR p
 Assert-True ($workflow -notmatch 'Publish-BsrRelease\.ps1\s+-BufCommand') 'The production workflow must not override the default Buf command.'
 Assert-True ($workflow -match "publish-bsr\.outputs\.bsr_state == 'published' \|\| needs\.publish-bsr\.outputs\.bsr_state == 'already_verified'") 'Baseline persistence must accept recovered BSR state.'
 Assert-True ($workflow -match 'Update-BsrBaseline\.ps1 -CommitId "\$\{\{ needs\.publish-bsr\.outputs\.bsr_commit_id \}\}"') 'Baseline persistence must use the recovered immutable BSR commit ID.'
+Assert-True ($workflow -match '(?ms)^  post-publication:.*?needs: \[preflight, build-artifact, attest-artifacts, publish-nuget, publish-bsr, persist-bsr-state\].*?permissions:\s+contents: write') 'GitHub Release creation must follow baseline persistence with contents-write scoped to its job.'
+Assert-True ($workflow -match '(?ms)^  post-publication:.*?Publish-GitHubRelease\.ps1.*?-Tag.*?needs\.preflight\.outputs\.release_tag.*?-ReleaseVersion.*?needs\.preflight\.outputs\.release_version') 'GitHub Release creation must derive identity from the release tag and version outputs.'
+Assert-True ($publishGitHubReleaseScript -match 'Resolve-HmReleaseTag') 'GitHub Release creation must validate the release tag identity.'
+Assert-True ($publishGitHubReleaseScript -match "Contains\('-', \[System\.StringComparison\]::Ordinal\)") 'GitHub Release prerelease state must derive from the release version.'
+Assert-True ($publishGitHubReleaseScript -match 'gh release view') 'GitHub Release creation must resolve an existing release before creating one.'
+Assert-True ($publishGitHubReleaseScript -match '\$lookup\.State -eq ''existing''') 'An existing GitHub Release must satisfy a retry without recreation.'
+Assert-True ($gitHubReleaseModule -match '--generate-notes') 'GitHub Release creation must use generated release notes.'
+Assert-True ($gitHubReleaseModule -match '--verify-tag') 'GitHub Release creation must not create or move a release tag.'
+Assert-True ($publishGitHubReleaseScript -notmatch 'gh release edit|gh release delete') 'GitHub Release retries must not modify or delete existing releases.'
 Assert-True ($validationScript -notmatch 'Publish-NuGetRelease|NUGET_TRUSTED_PUBLISHING_API_KEY|NuGet/login') 'Local validation must not publish or request release credentials.'
+Assert-True ($validationScript -notmatch 'Publish-GitHubRelease|gh release') 'Local validation must not create GitHub Releases.'
 
 Write-Output 'Release workflow tests passed.'
