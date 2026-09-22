@@ -13,6 +13,8 @@ $repositoryRoot = (& git rev-parse --show-toplevel).Trim()
 $workflow = Get-Content -LiteralPath (Join-Path $repositoryRoot '.github/workflows/release.yml') -Raw
 $buildScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Build-ReleaseArtifact.ps1') -Raw
 $publishScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Publish-NuGetRelease.ps1') -Raw
+$resolveNuGetScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Resolve-NuGetRelease.ps1') -Raw
+$publishBsrScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Publish-BsrRelease.ps1') -Raw
 $validationScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/validate.ps1') -Raw
 
 Assert-True ($workflow -match '(?ms)^  build-artifact:.*?Build and validate release package.*?Upload immutable release artifact') 'The release workflow must build and validate the release artifact before uploading it.'
@@ -23,15 +25,21 @@ Assert-True (($workflow | Select-String -Pattern 'uses: actions/attest@' -AllMat
 Assert-True ($workflow -match 'HDev\.Hm\.Logging\.Contracts\.\$\{\{ needs\.preflight\.outputs\.release_version \}\}\.nupkg') 'The NuGet package must be within the attestation boundary.'
 Assert-True ($workflow -match 'HDev\.Hm\.Logging\.Contracts\.\$\{\{ needs\.preflight\.outputs\.release_version \}\}\.snupkg') 'The NuGet symbol package must be within the attestation boundary.'
 Assert-True ($workflow -match '(?ms)^  publish-nuget:.*?needs: \[preflight, build-artifact, attest-artifacts\]') 'NuGet publication must depend on successful attestation.'
+Assert-True ($workflow -match "(?ms)Resolve NuGet release state.*?id: resolve.*?Log in to NuGet.org with OIDC.*?if: steps\.resolve\.outputs\.nuget_state == 'publish'") 'NuGet login must occur only after a publish decision.'
+Assert-True ($workflow -match "(?ms)Publish NuGet package.*?if: steps\.resolve\.outputs\.nuget_state == 'publish'") 'NuGet publication must occur only after a publish decision.'
 Assert-True ($workflow -match 'gh attestation verify') 'The workflow must verify generated attestations before publication.'
 Assert-True ($workflow -notmatch 'secrets\.NUGET_API_KEY') 'The official release workflow must not use a long-lived NuGet API key.'
 Assert-True ($workflow -match 'NuGet/login@d22cc5f58ff5b88bf9bd452535b4335137e24544') 'NuGet publication must use the immutable trusted-publishing login action.'
 Assert-True ($workflow -match '(?ms)^  publish-nuget:.*?permissions:\s+contents: read\s+id-token: write') 'NuGet publication must request its OIDC token with least privilege.'
 Assert-True ($publishScript -match 'Assert-ReleaseArtifactManifest') 'NuGet publication must verify the release artifact integrity manifest.'
 Assert-True ($publishScript -match 'Validate-ReleaseArtifact\.ps1') 'NuGet publication must validate its package before publication.'
+Assert-True ($resolveNuGetScript -notmatch 'NUGET_TRUSTED_PUBLISHING_API_KEY') 'NuGet resolution must not require a Trusted Publishing credential.'
 Assert-True ($publishScript -notmatch '\$env:NUGET_API_KEY') 'NuGet publication must not read a long-lived API key.'
 Assert-True (($buildScript | Select-String -Pattern 'dotnet pack' -AllMatches).Matches.Count -eq 1) 'The release build must pack exactly once.'
 Assert-True ($publishScript -notmatch 'dotnet pack') 'NuGet publication must not rebuild the release artifact.'
+Assert-True ($publishBsrScript.IndexOf('Resolve-BsrReleaseCommit -Reference $reference') -lt $publishBsrScript.IndexOf('& buf push')) 'BSR must resolve an existing release before it can push.'
+Assert-True ($workflow -match "publish-bsr\.outputs\.bsr_state == 'published' \|\| needs\.publish-bsr\.outputs\.bsr_state == 'already_verified'") 'Baseline persistence must accept recovered BSR state.'
+Assert-True ($workflow -match 'Update-BsrBaseline\.ps1 -CommitId "\$\{\{ needs\.publish-bsr\.outputs\.bsr_commit_id \}\}"') 'Baseline persistence must use the recovered immutable BSR commit ID.'
 Assert-True ($validationScript -notmatch 'Publish-NuGetRelease|NUGET_TRUSTED_PUBLISHING_API_KEY|NuGet/login') 'Local validation must not publish or request release credentials.'
 
 Write-Output 'Release workflow tests passed.'

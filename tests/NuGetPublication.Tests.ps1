@@ -20,6 +20,8 @@ Assert-Equal 'HDev.Hm.Logging.Contracts.1.0.0-preview.1.nupkg' (Get-HmNuGetPacka
 Assert-Equal 'already_verified' (Resolve-HmNuGetVerificationDecision -PackageExists $true -IdentityMatches $true)
 Assert-Equal 'publish' (Resolve-HmNuGetVerificationDecision -PackageExists $false -IdentityMatches $false)
 Assert-Throws { Resolve-HmNuGetVerificationDecision -PackageExists $true -IdentityMatches $false }
+Assert-Equal $true (Test-HmNuGetPublicationRequired -Decision 'publish')
+Assert-Equal $false (Test-HmNuGetPublicationRequired -Decision 'already_verified')
 Assert-Equal $true (Test-HmNuGetNotFoundStatusCode -StatusCode 404)
 Assert-Equal $false (Test-HmNuGetNotFoundStatusCode -StatusCode 500)
 Assert-Equal $false (Test-HmNuGetNotFoundStatusCode -StatusCode $null)

@@ -22,9 +22,15 @@ function Resolve-HmNuGetVerificationDecision {
     throw 'The existing NuGet package has a conflicting release identity.'
 }
 
+function Test-HmNuGetPublicationRequired {
+    param([Parameter(Mandatory)][string]$Decision)
+
+    return $Decision -ceq 'publish'
+}
+
 function Test-HmNuGetNotFoundStatusCode {
     param([object]$StatusCode)
     return $null -ne $StatusCode -and [int]$StatusCode -eq 404
 }
 
-Export-ModuleMember -Function Get-HmNuGetPackageName, Get-HmNuGetPackageUri, Resolve-HmNuGetVerificationDecision, Test-HmNuGetNotFoundStatusCode
+Export-ModuleMember -Function Get-HmNuGetPackageName, Get-HmNuGetPackageUri, Resolve-HmNuGetVerificationDecision, Test-HmNuGetNotFoundStatusCode, Test-HmNuGetPublicationRequired
