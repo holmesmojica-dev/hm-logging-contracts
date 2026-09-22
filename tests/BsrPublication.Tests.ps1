@@ -89,12 +89,24 @@ function Invoke-BsrPublicationScenario {
     try {
         New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
         $fakeScriptPath = Join-Path $temporaryDirectory 'fake-buf.ps1'
-        $fakeCommandPath = Join-Path $temporaryDirectory 'buf.cmd'
         $logPath = Join-Path $temporaryDirectory 'buf.log'
         $outputPath = Join-Path $temporaryDirectory 'github-output.txt'
         $resolveCountPath = Join-Path $temporaryDirectory 'resolve-count.txt'
         Set-Content -LiteralPath $fakeScriptPath -Value (Get-FakeBufScript) -NoNewline
-        Set-Content -LiteralPath $fakeCommandPath -Value '@pwsh -NoProfile -File "%~dp0fake-buf.ps1" %*' -NoNewline
+        if ($IsWindows) {
+            $fakeCommandPath = Join-Path $temporaryDirectory 'buf.cmd'
+            Set-Content -LiteralPath $fakeCommandPath -Value '@pwsh -NoProfile -File "%~dp0fake-buf.ps1" %*' -NoNewline
+        }
+        else {
+            $fakeCommandPath = Join-Path $temporaryDirectory 'buf'
+            Set-Content -LiteralPath $fakeCommandPath -Value @'
+#!/usr/bin/env sh
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec pwsh -NoProfile -File "$script_dir/fake-buf.ps1" "$@"
+'@ -NoNewline
+            & chmod +x $fakeCommandPath
+            if ($LASTEXITCODE -ne 0) { throw 'The POSIX fake Buf command could not be made executable.' }
+        }
 
         $sourceCommit = ('a' * 40) -join ''
         $env:HM_FAKE_BUF_SCENARIO = $Scenario
@@ -103,7 +115,16 @@ function Invoke-BsrPublicationScenario {
         $env:HM_FAKE_BUF_COMMIT_ID = '0123456789abcdef0123456789abcdef'
         $env:HM_FAKE_BUF_SOURCE_URL = Get-HmBsrSourceControlUrl -Commit $sourceCommit
         $env:BUF_TOKEN = 'test-token'
-        $env:Path = "$temporaryDirectory;$originalPath"
+        $env:Path = "$temporaryDirectory$([System.IO.Path]::PathSeparator)$originalPath"
+        $resolvedFakeCommandOutput = @(& pwsh -NoProfile -Command '$command = Get-Command buf -CommandType Application -ErrorAction Stop | Select-Object -First 1; [Console]::Out.Write($command.Source)')
+        if ($LASTEXITCODE -ne 0 -or $resolvedFakeCommandOutput.Count -ne 1) { throw 'The fake Buf command does not take precedence on PATH.' }
+        $resolvedFakeCommandPath = ([string]$resolvedFakeCommandOutput[0]).Trim()
+        $canonicalFakeCommandPath = (Resolve-Path -LiteralPath $fakeCommandPath -ErrorAction Stop).ProviderPath
+        $canonicalResolvedCommandPath = (Resolve-Path -LiteralPath $resolvedFakeCommandPath -ErrorAction Stop).ProviderPath
+        $pathComparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+        if (-not [string]::Equals($canonicalResolvedCommandPath, $canonicalFakeCommandPath, $pathComparison)) {
+            throw 'The fake Buf command does not take precedence on PATH.'
+        }
 
         & pwsh -NoProfile -File (Join-Path $PSScriptRoot '..\scripts\Publish-BsrRelease.ps1') -Tag 'v1.0.0-preview.1' -Commit $sourceCommit -GitHubOutputPath $outputPath *> $null
         $exitCode = $LASTEXITCODE
