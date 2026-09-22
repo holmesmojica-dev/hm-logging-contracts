@@ -15,6 +15,7 @@ $buildScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Buil
 $publishScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Publish-NuGetRelease.ps1') -Raw
 $resolveNuGetScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Resolve-NuGetRelease.ps1') -Raw
 $publishBsrScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Publish-BsrRelease.ps1') -Raw
+$updateBsrBaselineScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Update-BsrBaseline.ps1') -Raw
 $publishGitHubReleaseScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/Publish-GitHubRelease.ps1') -Raw
 $gitHubReleaseModule = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/GitHubRelease.psm1') -Raw
 $validationScript = Get-Content -LiteralPath (Join-Path $repositoryRoot 'scripts/validate.ps1') -Raw
@@ -47,6 +48,7 @@ Assert-True ($publishBsrScript -match '\[string\]\$BufCommand = ''buf''') 'BSR p
 Assert-True ($workflow -notmatch 'Publish-BsrRelease\.ps1\s+-BufCommand') 'The production workflow must not override the default Buf command.'
 Assert-True ($workflow -match "publish-bsr\.outputs\.bsr_state == 'published' \|\| needs\.publish-bsr\.outputs\.bsr_state == 'already_verified'") 'Baseline persistence must accept recovered BSR state.'
 Assert-True ($workflow -match 'Update-BsrBaseline\.ps1 -CommitId "\$\{\{ needs\.publish-bsr\.outputs\.bsr_commit_id \}\}"') 'Baseline persistence must use the recovered immutable BSR commit ID.'
+Assert-True ($updateBsrBaselineScript -match '\$CommitId -cnotmatch ''\^\[0-9a-f\]\{32\}\$''') 'Baseline persistence must reject INITIAL and malformed publication commit IDs.'
 Assert-True ($workflow -match '(?ms)^  post-publication:.*?needs: \[preflight, build-artifact, attest-artifacts, publish-nuget, publish-bsr, persist-bsr-state\].*?permissions:\s+contents: write') 'GitHub Release creation must follow baseline persistence with contents-write scoped to its job.'
 Assert-True ($workflow -match '(?ms)^  post-publication:.*?Publish-GitHubRelease\.ps1.*?-Tag.*?needs\.preflight\.outputs\.release_tag.*?-ReleaseVersion.*?needs\.preflight\.outputs\.release_version') 'GitHub Release creation must derive identity from the release tag and version outputs.'
 Assert-True ($publishGitHubReleaseScript -match 'Resolve-HmReleaseTag') 'GitHub Release creation must validate the release tag identity.'
