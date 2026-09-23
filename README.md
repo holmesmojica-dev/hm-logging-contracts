@@ -1,5 +1,12 @@
 # Hm.Logging.Contracts
 
+[![NuGet](https://img.shields.io/nuget/vpre/HDev.Hm.Logging.Contracts?label=nuget)](https://www.nuget.org/packages/HDev.Hm.Logging.Contracts)
+[![BSR](https://img.shields.io/badge/BSR-hdev--hm%2Flogging-blue)](https://buf.build/hdev-hm/logging)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=holmesmojica-dev_hm-logging-contracts&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=holmesmojica-dev_hm-logging-contracts)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=holmesmojica-dev_hm-logging-contracts&metric=coverage)](https://sonarcloud.io/summary/new_code?id=holmesmojica-dev_hm-logging-contracts)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
+
 `Hm.Logging.Contracts` defines the language-neutral Protocol Buffers and gRPC
 contract for distributed HM Logging. It represents the HM Logging domain and
 the distributed Logging Flow architecture; it does not implement logging
