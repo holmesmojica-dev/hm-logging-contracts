@@ -10,22 +10,64 @@ option csharp_namespace = "Hm.Logging.Contracts";
 // status communicates whether an operation could execute validly; response
 // result enums communicate valid semantic outcomes. This contract does not
 // implement Flow state, lifecycle storage, or provider behavior.
+// Submit events as LogEntry messages. When related calls need shared defaults,
+// use a Logging Flow whose scopes carry LogContext layers for enrichment:
+// CreateFlow -> PushScope / PopScope / Log -> CloseFlow.
+// Log can also be called independently by omitting LogRequest.flow_id.
+//
+// gRPC OK means the operation executed validly, not necessarily that its primary
+// action changed state. Inspect the response result enum for outcomes such as
+// an already closed Flow, a scope mismatch, or acceptance without a requested
+// Flow. CreateFlow has one success outcome and therefore no result enum.
+// Non-OK gRPC statuses report invalid requests or operation/transport failures;
+// response result enums describe valid outcomes, not substitutes for failures.
+// A lost response does not prove that nothing happened: apply each RPC's retry
+// rules. Order calls on a shared Flow to establish the intended scope lifetime.
 service LoggingService {
   // Creates a new empty Flow and returns its opaque identifier.
+  // Use when multiple events need shared or nested context across calls; retain
+  // CreateFlowResponse.flow_id for later scope, logging, and closure operations.
+  // Not idempotent: retrying after a lost response may create another Flow.
+  // Use the identifier successfully received; a retry does not recover the
+  // original identifier. See CreateFlowRequest/Response for lifecycle guidance.
   rpc CreateFlow(CreateFlowRequest) returns (CreateFlowResponse);
 
   // Explicitly closes a Flow. Closing an inactive Flow is a valid idempotent
   // outcome represented by CloseFlowResult.
+  // Call when the shared contextual lifetime ends. After a successful call,
+  // the Flow is inactive: scope operations cannot target it, while valid Log
+  // calls using its identifier can still be accepted without Flow context.
+  // Retrying preserves closure; inspect CloseFlowResponse.result to distinguish
+  // CLOSED from ALREADY_CLOSED. Both are successful gRPC OK outcomes.
   rpc CloseFlow(CloseFlowRequest) returns (CloseFlowResponse);
 
   // Adds a context layer to an existing Flow. Repeating the current top
   // context is a valid no-op that preserves PushScope retry safety.
+  // Use before a group of events that should inherit LogContext defaults.
+  // The new top layer overrides inherited context; explicit entry values still
+  // win. Await the push before logging with it, then use PopScope on leaving
+  // the scope. Only the current top is compared on a retry, so coordinate other
+  // calls on the same Flow. PushScopeRequest and PushScopeResponse define valid
+  // context and result rules, including whether a layer was actually added.
   rpc PushScope(PushScopeRequest) returns (PushScopeResponse);
 
   // Removes the top Flow context. A guarded request with expected_context is
   // the retry-safe form; an unconditional request is not retry-safe.
+  // Use when leaving the most recent scope to restore preceding defaults.
+  // Removing the last layer leaves the Flow active. A supplied expected_context
+  // must match the normalized top; otherwise no layer is removed. Inspect
+  // PopScopeResponse.result even on gRPC OK for no scopes or a context mismatch.
+  // A blind unconditional retry can remove another layer after a lost response.
+  // See PopScopeRequest for the guard's value-comparison and ordering rules.
   rpc PopScope(PopScopeRequest) returns (PopScopeResponse);
 
   // Submits a structured entry independently or with an optional Flow.
+  // Omit flow_id when the event needs no shared Flow context. With an active
+  // Flow, its effective LogContext enriches the LogEntry while explicit entry
+  // values take precedence. A valid but nonexistent, closed, or expired Flow
+  // permits acceptance without Flow context; inspect LogResponse.result for
+  // that successful fallback. Invalid supplied data is still rejected.
+  // Not idempotent: retrying after a lost response may duplicate the event.
+  // See LogRequest and LogResult for presence, validation, and outcome details.
   rpc Log(LogRequest) returns (LogResponse);
 }
