@@ -8,97 +8,207 @@ option csharp_namespace = "Hm.Logging.Contracts";
 
 // Requests creation of one new, empty Logging Flow. CreateFlow is not
 // idempotent: a retry after a lost response can create another Flow.
+// A Flow is server-managed remote context shared across logging calls. Create
+// one when related events need shared defaults or nested scopes; otherwise use
+// Log without a flow_id. This request has no fields or input configuration.
+//
+// Lifecycle: CreateFlow -> PushScope / PopScope / Log -> CloseFlow.
+// A new Flow is active with no scopes. Popping its last scope leaves it active;
+// explicit closure or expiration makes it inactive. Expiration timing and
+// activity-refresh rules are not defined by this contract.
+//
+// PushScope, PopScope, and CloseFlow mutations are atomic and serialized per
+// Flow; different Flows may operate concurrently. Callers must order operations
+// on the same Flow according to their intended use. For example, await a push
+// before logging with that scope, and finish using the Flow before closing it.
+// Concurrent requests do not establish the caller's intended business order.
 message CreateFlowRequest {}
 
 // Returns the opaque identifier of the newly created Flow.
+// gRPC OK has this single success outcome, so no result enum is needed.
+// If a response is lost, use the identifier from a successful response rather
+// than assuming a retry recovers the original Flow; v1 has no creation retry token.
 message CreateFlowResponse {
+  // Identifier to pass unchanged to later Flow operations. It identifies remote
+  // contextual state, not a trace_id, correlation_id, or business operation.
+  // Treat it as opaque; do not construct or interpret its internal format.
   string flow_id = 1;
+  // Human-readable description of creation. The flow_id is the returned handle;
+  // this text is not an identifier or a substitute for checking gRPC status.
   string message = 2;
 }
 
 // Requests explicit closure of a Flow. The flow_id is semantically required.
+// Call when the shared contextual lifetime ends. Successful closure guarantees
+// that the Flow is inactive, including on retries: CloseFlow is idempotent by
+// postcondition. It does not reopen or create a Flow.
+// Subsequent PushScope/PopScope calls for that inactive Flow return NOT_FOUND;
+// a valid Log request using it is accepted without Flow context.
 message CloseFlowRequest {
+  // Opaque identifier of the Flow to end. Omitted, empty, or whitespace-only
+  // values are INVALID_ARGUMENT. A valid identifier with no active Flow is a
+  // successful ALREADY_CLOSED outcome, not a NOT_FOUND error.
   string flow_id = 1;
 }
 
 // Describes a valid CloseFlow outcome. UNSPECIFIED is defensive and is not a
 // functional result.
 enum CloseFlowResult {
+  // Defensive protobuf default, not a valid operational outcome.
   CLOSE_FLOW_RESULT_UNSPECIFIED = 0;
+  // An active Flow was closed. Subsequent calls no longer use its scopes.
   CLOSE_FLOW_RESULT_CLOSED = 1;
+  // No active Flow exists for the valid identifier; no action was needed.
+  // This includes never-existing, already closed, and expired Flows without
+  // distinguishing them. A repeated successful close can return this result.
   CLOSE_FLOW_RESULT_ALREADY_CLOSED = 2;
 }
 
 // Reports the semantic outcome of closing a Flow. Valid no-op outcomes use
 // gRPC OK and this result rather than an embedded transport status code.
 message CloseFlowResponse {
+  // CLOSED or ALREADY_CLOSED on gRPC OK; both mean the Flow is now inactive.
   CloseFlowResult result = 1;
+  // Human-readable outcome description. Use result for programmatic decisions.
   string message = 2;
 }
 
 // Adds context to an existing Flow. Both fields are semantically required.
 // PushScope never creates a missing Flow.
+// Push shared defaults before logging a group of events, then pop the layer
+// when leaving that scope. Layers form a LIFO stack: inner values override
+// inherited context, and explicit LogEntry values take precedence over both.
+//
+// Only the current top layer is compared for duplication. Retrying the same
+// normalized context while it remains on top returns ALREADY_EXISTS. The same
+// context deeper in the stack does not prevent a new push. Coordinate other
+// operations on this Flow during retries; this is not request-ID deduplication.
 message PushScopeRequest {
+  // Opaque identifier returned by CreateFlow. Missing/empty/whitespace-only
+  // input is INVALID_ARGUMENT; a valid but nonexistent, closed, or expired
+  // Flow is NOT_FOUND. Create a Flow explicitly before pushing its first scope.
   string flow_id = 1;
+  // New layer of shared defaults; see LogContext for field and metadata rules.
+  // Must be present and retain at least one contextual value or metadata entry
+  // after normalization. Missing or empty normalized context is INVALID_ARGUMENT.
+  // Equality compares all normalized contextual properties and metadata keys
+  // and values; metadata map order does not affect equality.
   LogContext context = 2;
 }
 
 // Describes a valid PushScope outcome. UNSPECIFIED is defensive and is not a
 // functional result.
 enum PushScopeResult {
+  // Defensive protobuf default, not a valid operational outcome.
   PUSH_SCOPE_RESULT_UNSPECIFIED = 0;
+  // A new top layer was added: the stack was empty or its top was different.
   PUSH_SCOPE_RESULT_ADDED = 1;
+  // An equivalent normalized context was already on top. No layer was added;
+  // do not count this outcome as an additional scope to pop later.
   PUSH_SCOPE_RESULT_ALREADY_EXISTS = 2;
 }
 
 // Reports whether a context was added or was already the Flow's top context.
 message PushScopeResponse {
+  // ADDED or ALREADY_EXISTS on gRPC OK. Both are valid outcomes, including the
+  // no-op case; invalid input or an inactive Flow is reported by gRPC status.
   PushScopeResult result = 1;
+  // Human-readable outcome description. Use result to determine whether a
+  // layer was actually added rather than parsing this text.
   string message = 2;
 }
 
 // Removes the top context from a Flow. If expected_context is omitted, the
 // operation is unconditional and is not retry-safe. When supplied, it guards
 // the operation and supports retry-safe PopScope semantics.
+// Removing a layer restores the preceding effective context; it never removes
+// a deeper matching layer. Removing the final layer leaves the Flow active.
+//
+// After a lost successful response, an unconditional retry may remove the next
+// layer. A guarded retry instead sees CONTEXT_MISMATCH or NO_SCOPES once its
+// expected layer is gone. Consecutive equivalent layers are prevented by
+// PushScope. Callers must still order concurrent operations: the guard compares
+// context values, not a unique scope identity or a history of prior requests.
 message PopScopeRequest {
+  // Opaque target Flow identifier. Missing/empty/whitespace-only input is
+  // INVALID_ARGUMENT. A valid but nonexistent, closed, or expired Flow returns
+  // NOT_FOUND, which differs from an active Flow with no scopes.
   string flow_id = 1;
+  // Omit to remove the current top unconditionally. Supply the context you
+  // expect on top to remove it only if all normalized properties and metadata
+  // keys/values match; map order is irrelevant. A mismatch changes nothing.
+  // Present-but-empty after normalization is INVALID_ARGUMENT, not an
+  // unconditional pop. Use this guarded form when a call may need retrying.
   optional LogContext expected_context = 2;
 }
 
 // Describes a valid PopScope outcome. UNSPECIFIED is defensive and is not a
 // functional result.
 enum PopScopeResult {
+  // Defensive protobuf default, not a valid operational outcome.
   POP_SCOPE_RESULT_UNSPECIFIED = 0;
+  // Exactly the top scope was removed; any supplied expected_context matched.
   POP_SCOPE_RESULT_REMOVED = 1;
+  // The Flow is active but has no scopes. Nothing changed, and it stays active.
   POP_SCOPE_RESULT_NO_SCOPES = 2;
+  // A top scope exists but differs from the supplied normalized expected_context.
+  // Nothing was removed. This can be a valid outcome of retrying a guarded pop.
   POP_SCOPE_RESULT_CONTEXT_MISMATCH = 3;
 }
 
 // Reports the semantic outcome of removing a Flow scope.
+// REMOVED, NO_SCOPES, and CONTEXT_MISMATCH all use gRPC OK. A valid no-op is
+// not an operation failure; invalid input or an inactive Flow uses gRPC status.
 message PopScopeResponse {
+  // Indicates whether a layer was removed, none existed, or the guard mismatched.
   PopScopeResult result = 1;
+  // Human-readable outcome description. Use result for programmatic decisions.
   string message = 2;
 }
 
 // Submits one log entry. flow_id is optional: omission requests independent
 // logging without Flow context. A supplied inactive Flow does not discard the
 // entry; it produces ACCEPTED_WITHOUT_FLOW.
+// With an active Flow, its effective scope context enriches the event according
+// to LogContext/LogEntry precedence. An active Flow with an empty stack is still
+// a valid target. Await required scope changes before logging so the intended
+// contextual ordering is established.
+// Log is not idempotent: retrying after a lost response may duplicate an entry.
+// Neither flow_id nor trace/correlation identifiers act as deduplication tokens.
 message LogRequest {
+  // Omit for independent logging when no cross-call context is needed.
+  // If present, supply an opaque Flow identifier. Empty/whitespace-only or
+  // otherwise malformed supplied input is INVALID_ARGUMENT, not independent
+  // logging. A valid inactive/nonexistent identifier allows acceptance without
+  // Flow enrichment and yields ACCEPTED_WITHOUT_FLOW; it does not create a Flow.
   optional string flow_id = 1;
+  // Event to submit, semantically required. See LogEntry for presence, severity,
+  // timestamp, and metadata rules. Missing entry or invalid message causes
+  // INVALID_ARGUMENT; Flow fallback does not bypass event validation.
+  // Explicit entry properties and metadata values override inherited context.
   LogEntry entry = 2;
 }
 
 // Describes a valid Log outcome. UNSPECIFIED is defensive and is not a
 // functional result.
 enum LogResult {
+  // Defensive protobuf default, not a valid operational outcome.
   LOG_RESULT_UNSPECIFIED = 0;
+  // Accepted independently when no flow_id was supplied, or with the effective
+  // context of an active Flow (which may have no scopes).
   LOG_RESULT_ACCEPTED = 1;
+  // A valid flow_id was supplied but no active Flow existed for it, including
+  // never-existing, closed, or expired Flows. The entry was accepted without
+  // Flow context. This is a successful fallback, not a reason to resubmit it.
   LOG_RESULT_ACCEPTED_WITHOUT_FLOW = 2;
 }
 
 // Reports whether the entry was accepted with or without Flow context. Log is
 // not idempotent: a retry after a lost response can create a duplicate entry.
 message LogResponse {
+  // ACCEPTED or ACCEPTED_WITHOUT_FLOW on gRPC OK. Inspect this value to detect
+  // fallback from a requested Flow; both outcomes mean the entry was accepted.
   LogResult result = 1;
+  // Human-readable outcome description. Use result for programmatic decisions.
   string message = 2;
 }

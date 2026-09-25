@@ -8,22 +8,41 @@ import "google/type/decimal.proto";
 
 option csharp_namespace = "Hm.Logging.Contracts";
 
-// Defines the severity of a log entry. Trace is an explicit domain value, not
-// an unspecified sentinel.
+// Classifies an event by severity, from Trace through Critical. Choose the
+// level that describes the event using the guidance on each value below.
+// The numeric values are part of the immutable v1 wire contract. Trace = 0 is
+// a legitimate explicit selection, not an unspecified sentinel; use presence
+// on LogEntry.level to distinguish it from an omitted level.
 enum LogLevel {
+  // Detailed diagnostic information for investigating execution behavior.
   LOG_LEVEL_TRACE = 0;
+  // Developer-focused diagnostics for troubleshooting application behavior.
   LOG_LEVEL_DEBUG = 1;
+  // General informational events describing normal application flow.
   LOG_LEVEL_INFORMATION = 2;
+  // A potential issue or unexpected situation, not necessarily a failure.
   LOG_LEVEL_WARNING = 3;
+  // A failure that occurred during execution.
   LOG_LEVEL_ERROR = 4;
+  // A severe failure requiring immediate attention.
   LOG_LEVEL_CRITICAL = 5;
 }
 
 // Represents an absolute metadata date/time and, when supplied by the
 // producer, the UTC offset of its original representation. The offset does
 // not change the absolute instant and is not a time-zone identifier.
+// Use this metadata category for event-related dates, such as an order's
+// creation time; LogEntry.timestamp remains the time of the logging event.
+// Resolve local or ambiguous times before transmission; no receiver time zone
+// is inferred. For example, 13:30 -05:00 is encoded as the instant 18:30 UTC
+// on that date, with an optional offset of -18000 seconds.
 message DateTimeValue {
+  // The absolute instant, semantically required whenever DateTimeValue is used.
+  // Supply a valid protobuf Timestamp; the UTC offset is not added to it.
   google.protobuf.Timestamp timestamp = 1;
+  // Optional original UTC offset as a valid protobuf Duration. Omit it when
+  // preserving the original offset is unnecessary or it is unknown. A present
+  // zero offset records UTC; omission does not claim an original UTC offset.
   google.protobuf.Duration utc_offset = 2;
 }
 
@@ -31,16 +50,49 @@ message DateTimeValue {
 // metadata value. Producers use string_value for textual identifiers such as
 // characters, UUIDs, and enum representations when no dedicated category is
 // required by this protocol.
+// Choose the branch that preserves the value's semantic category and precision.
+// Objects, bytes, arrays, and nested collections are not supported categories:
+// flatten relevant properties into scalar entries or serialize them to text
+// before transmission. The contract does not reconstruct the original object.
+// Semantic normalization discards entries with no selected branch or empty
+// keys/textual values. Explicitly malformed typed values are invalid input,
+// not absence: an operation carrying them returns INVALID_ARGUMENT without
+// writing a log or changing Flow state.
 message MetadataValue {
+  // Select one representation for each retained value. Selecting false or zero
+  // is still a supplied value and differs from leaving this oneof unset.
   oneof value {
+    // Text, including producer-defined identifiers, characters, UUID/GUID text,
+    // enum names, or serialized JSON. No UUID, enum, or object type is inferred
+    // or validated from the text; the producer owns those semantics.
     string string_value = 1;
+    // A true/false fact, such as whether a cache lookup succeeded.
     bool boolean_value = 2;
+    // Signed whole number. Smaller native signed integers can be widened here;
+    // conversion to or from a consumer's native type must be lossless.
     int64 signed_integer_value = 3;
+    // Unsigned whole number. Use this for unsigned values rather than routing
+    // them through int64, which cannot represent the full uint64 range.
     uint64 unsigned_integer_value = 4;
+    // Single-precision floating point. Preserves this precision category,
+    // including protobuf NaN and positive/negative infinity.
     float float_value = 5;
+    // Double-precision floating point, including protobuf NaN and infinities.
+    // Use decimal_value when decimal precision must be preserved instead.
     double double_value = 6;
+    // Precision-preserving decimal using the canonical google.type.Decimal
+    // string representation, not a binary floating-point approximation.
+    // The supplied value must satisfy google.type.Decimal's representation
+    // rules. A valid wire decimal is not necessarily representable by every
+    // native decimal type: conversion must preserve its value without loss.
+    // Native range and precision checks depend on the target language/runtime;
+    // the protobuf representation does not impose a particular native type.
     google.type.Decimal decimal_value = 7;
+    // An absolute date/time with an optional original UTC offset. See
+    // DateTimeValue for construction rules; it is not an unresolved local time.
     DateTimeValue date_time_value = 8;
+    // An elapsed interval, such as operation duration, not an absolute instant.
+    // Supply a valid protobuf Duration; consumers own native-type conversion.
     google.protobuf.Duration duration_value = 9;
   }
 }
@@ -49,23 +101,86 @@ message MetadataValue {
 // contextual property or metadata value takes precedence over this context.
 // Flow identity and event-specific properties are intentionally not context
 // fields.
+// Use a context to share source, tracing, or metadata across related entries
+// without repeating those values on each event. In a Logging Flow, PushScope
+// adds a context layer; more specific layers override inherited values, then
+// explicit entry values win. Contracts carries these defaults; the receiving
+// implementation performs enrichment and semantic normalization.
+// For distributed scope operations, a context must retain at least one field
+// or metadata entry after normalization. An empty normalized context is invalid.
 message LogContext {
+  // Optional shared logical origin, such as "checkout-service" or "billing".
+  // Use an application, service, component, or module name. Entries can supply
+  // their own source to override this default; omit if there is no shared origin.
   optional string source = 1;
+  // Optional shared technical execution-trace identifier. Supply it when the
+  // contextual entries belong to that trace; an entry's trace_id takes precedence.
+  // This is not the Logging Flow ID, and Contracts does not generate it.
   optional string trace_id = 2;
+  // Optional identifier linking related requests, services, or business
+  // operations. Use when entries share that correlation; an entry may override
+  // it. It is distinct from both an execution trace and the Logging Flow ID.
   optional string correlation_id = 3;
+  // Shared structured facts, such as "tenant.id", used to enrich entries.
+  // Entries merge with this map and win collisions on the same key. The
+  // reserved-key and scalar-value rules documented on LogEntry.metadata apply
+  // here too. An empty map supplies no metadata; map order has no meaning.
   map<string, MetadataValue> metadata = 4;
 }
 
 // Represents a structured logging event. The level and scalar optional fields
 // preserve wire presence. An omitted timestamp is preserved as omitted; this
 // protocol does not generate event timestamps or trace identifiers.
+// Supply event-specific information here and use LogContext for shared defaults.
+// The receiving implementation validates and enriches the event; constructing
+// or serializing this message does not itself validate its semantic rules.
+// A Flow ID, when needed, belongs on LogRequest rather than inside this entry.
 message LogEntry {
+  // Human-readable description of what happened, for example "Order submitted".
+  // Semantically required: omitted, empty, and whitespace-only messages are
+  // invalid and cause Log to return INVALID_ARGUMENT. Put additional
+  // structured facts in metadata rather than relying only on message text.
   string message = 1;
+  // Event severity; select a LogLevel appropriate to the event. Presence matters:
+  // explicit Trace (zero) is not omission. Omission is preserved by Contracts,
+  // which applies no wire default. To request Information explicitly, set that
+  // value rather than relying on omission. Context does not supply level.
   optional LogLevel level = 2;
+  // Absolute time of this event as a valid protobuf Timestamp. Supply it to
+  // retain the producer's event time, resolving any local time zone first.
+  // Omission is preserved on the wire; Contracts neither generates a timestamp
+  // nor infers a receiver time zone. Supply this field when the event must
+  // retain a specific time; omission does not specify a replacement time.
   google.protobuf.Timestamp timestamp = 3;
+  // Optional logical origin: the application, service, component, or module
+  // that generated the event, for example "checkout-service". Supply it for an
+  // event-specific origin; otherwise LogContext.source can provide the default.
+  // An explicit entry value takes precedence over contextual source.
   optional string source = 4;
+  // Optional technical execution-trace identifier for this event. Supply the
+  // known trace ID to connect the event to that trace, or inherit it from
+  // LogContext. An explicit value wins; Contracts never generates a trace ID.
+  // It does not identify the server-managed Logging Flow.
   optional string trace_id = 5;
+  // Optional identifier correlating related requests, services, or business
+  // operations. Supply an event-specific value or inherit LogContext's value.
+  // An explicit value wins; this identifier is not the Logging Flow ID.
   optional string correlation_id = 6;
+  // Optional diagnostic exception text supplied by the originating application.
+  // Plain text, JSON, or another textual representation may be used; no internal
+  // exception schema or native runtime type is required or reconstructed.
+  // Omit when there is no exception information. Normalization treats
+  // empty/whitespace-only text as absent; context does not supply exceptions.
   optional string exception = 7;
+  // Additional structured facts for filtering and diagnostics, for example
+  // "order.id" as text or "retry.count" as an integer. Use keys for ordinary
+  // application facts, not alternative representations of structural fields.
+  // Reserved keys (case-insensitive) are Message, Level, Timestamp, Source,
+  // TraceId, CorrelationId, Exception, and Metadata. Use the dedicated fields
+  // instead; reserved-key validation belongs to the receiving implementation.
+  // Values use MetadataValue's scalar categories. Entry metadata merges with
+  // contextual metadata, with the entry value winning on the same key.
+  // An empty map means no metadata; absent and empty maps are not distinguished,
+  // and map order has no semantic meaning. Normalization occurs at the consumer.
   map<string, MetadataValue> metadata = 8;
 }
