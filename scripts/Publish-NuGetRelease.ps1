@@ -40,6 +40,7 @@ try {
         }
         if ($available) {
             & (Join-Path $PSScriptRoot 'Validate-ReleaseArtifact.ps1') -PackageDirectory $temporaryDirectory -ReleaseVersion $ReleaseVersion -Commit $Commit -SkipSymbolPackage
+            Assert-HmNuGetContentIdentity -LocalPackagePath $candidates[0].FullName -RemotePackagePath $remotePackage
             @("release_version=$ReleaseVersion", "source_commit=$Commit", 'nuget_state=published') | Add-Content -LiteralPath $GitHubOutputPath
             return
         }

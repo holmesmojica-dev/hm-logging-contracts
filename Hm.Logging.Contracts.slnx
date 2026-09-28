@@ -5,4 +5,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Hm.Logging.Contracts.Tests/Hm.Logging.Contracts.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Hm.Logging.Contracts.ReleaseTools/Hm.Logging.Contracts.ReleaseTools.csproj" />
+  </Folder>
 </Solution>
