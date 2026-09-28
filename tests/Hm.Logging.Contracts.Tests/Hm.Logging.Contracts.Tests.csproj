@@ -9,9 +9,11 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="xunit.v3" />
+    <PackageReference Include="NuGet.Packaging" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Hm.Logging.Contracts\Hm.Logging.Contracts.csproj" />
+    <ProjectReference Include="..\..\tools\Hm.Logging.Contracts.ReleaseTools\Hm.Logging.Contracts.ReleaseTools.csproj" />
   </ItemGroup>
 </Project>

@@ -30,15 +30,20 @@ try {
     }
 
     $identityMatches = $false
+    $contentMatches = $false
     if ($packageExists) {
         try {
             & (Join-Path $PSScriptRoot 'Validate-ReleaseArtifact.ps1') -PackageDirectory $temporaryDirectory -ReleaseVersion $ReleaseVersion -Commit $Commit -SkipSymbolPackage
             $identityMatches = $true
         }
         catch { $identityMatches = $false }
+        if ($identityMatches) {
+            Assert-HmNuGetContentIdentity -LocalPackagePath (Join-Path $PackageDirectory $packageName) -RemotePackagePath $remotePackage
+            $contentMatches = $true
+        }
     }
 
-    $decision = Resolve-HmNuGetVerificationDecision -PackageExists $packageExists -IdentityMatches $identityMatches
+    $decision = Resolve-HmNuGetVerificationDecision -PackageExists $packageExists -IdentityMatches $identityMatches -ContentMatches $contentMatches
     @("release_version=$ReleaseVersion", "source_commit=$Commit", "nuget_state=$decision") | Add-Content -LiteralPath $GitHubOutputPath
 }
 finally {
